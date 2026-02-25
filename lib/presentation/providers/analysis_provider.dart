@@ -21,11 +21,11 @@ final analysisRepositoryProvider = Provider<AnalysisRepository>(
 final analysisProvider =
     FutureProvider.family<AnalysisModel, String>((ref, matchId) async {
   final auth = ref.watch(authStateProvider).value;
-  if (auth == null) throw Exception('Giriş yapmalısınız.');
+  final userId = auth?.uid ?? 'anonymous';
 
   return ref.watch(analysisRepositoryProvider).getOrRequestAnalysis(
         matchId: matchId,
-        userId: auth.uid,
+        userId: userId,
       );
 });
 
@@ -34,10 +34,10 @@ final analysisProvider =
 final analysisStatusProvider =
     StreamProvider.family<String, String>((ref, matchId) {
   final auth = ref.watch(authStateProvider).value;
-  if (auth == null) return Stream.value('idle');
+  final userId = auth?.uid ?? 'anonymous';
 
   return ref.watch(analysisRepositoryProvider).streamAnalysisStatus(
         matchId: matchId,
-        userId: auth.uid,
+        userId: userId,
       );
 });

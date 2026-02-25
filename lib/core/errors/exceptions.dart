@@ -17,4 +17,14 @@ class NetworkException implements Exception {
 class RateLimitException implements Exception {
   final int remaining;
   const RateLimitException({this.remaining = 0});
+
+  @override
+  String toString() => 'Gunluk analiz limitinize ulastiniz.';
+}
+
+class AnalysisTimeoutException implements Exception {
+  const AnalysisTimeoutException();
+
+  @override
+  String toString() => 'Analiz zaman asimina ugradi. Tekrar deneyin.';
 }

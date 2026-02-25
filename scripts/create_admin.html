@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>FutbolAI Admin Olustur</title>
+</head>
+
+<body>
+    <h2>Admin Kullanici Olusturuluyor...</h2>
+    <pre id="log"></pre>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
+        import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+
+        const app = initializeApp({
+            apiKey: "AIzaSyCGzE8GvHi8AXGExwFCOayJu37L6q3wFcQ",
+            authDomain: "futbol-ai-app.firebaseapp.com",
+            projectId: "futbol-ai-app",
+            storageBucket: "futbol-ai-app.firebasestorage.app",
+            messagingSenderId: "911057238614",
+            appId: "1:911057238614:web:6dcba01f6d6735292999f7"
+        });
+
+        const log = document.getElementById("log");
+        function addLog(msg) { log.textContent += msg + "\n"; }
+
+        try {
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+
+            addLog("Firebase basladi...");
+
+            const email = "admin@futbolai.com";
+            const password = "Admin2026!";
+
+            const cred = await createUserWithEmailAndPassword(auth, email, password);
+            addLog("Kullanici olusturuldu: " + cred.user.uid);
+
+            // Firestore profil
+            await setDoc(doc(db, "users", cred.user.uid), {
+                uid: cred.user.uid,
+                displayName: "Admin",
+                email: email,
+                tier: "premium",
+                role: "admin",
+                createdAt: serverTimestamp(),
+                lastLoginAt: serverTimestamp(),
+            });
+            addLog("Firestore profil kaydedildi");
+
+            addLog("\n=== BASARILI ===");
+            addLog("Email: " + email);
+            addLog("Sifre: Admin2026!");
+            addLog("Rol: admin / premium");
+        } catch (e) {
+            if (e.code === "auth/email-already-in-use") {
+                addLog("Kullanici zaten mevcut! Giris bilgileri:");
+                addLog("Email: admin@futbolai.com");
+                addLog("Sifre: Admin2026!");
+            } else {
+                addLog("HATA: " + e.message);
+            }
+        }
+    </script>
+</body>
+
+</html>

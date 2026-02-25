@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>FutbolAI Seed</title>
+</head>
+
+<body>
+  <h2>FutbolAI — Maç Verisi Ekleme</h2>
+  <button id="btn" onclick="seed()">🚀 9 Maç Ekle (Süper Lig 25. Hafta)</button>
+  <pre id="log"></pre>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, Timestamp } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-firestore.js";
+
+    const app = initializeApp({
+      apiKey: "AIzaSyCGzE8GvHi8AXGExwFCOayJu37L6q3wFcQ",
+      authDomain: "futbol-ai-app.firebaseapp.com",
+      projectId: "futbol-ai-app",
+      storageBucket: "futbol-ai-app.firebasestorage.app",
+      messagingSenderId: "911057238614",
+      appId: "1:911057238614:web:6dcba01f6d6735292999f7"
+    });
+    const db = getFirestore(app);
+
+    const matches = [
+      { homeTeam: { name: "Beşiktaş", shortName: "BJK", logoUrl: "", formLast5: "GGBMG" }, awayTeam: { name: "Galatasaray", shortName: "GS", logoUrl: "", formLast5: "GGGBG" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-07T20:00:00+03:00")), stadium: "Tüpraş Stadyumu", status: "upcoming", odds: { home: 3.10, draw: 3.25, away: 2.30, source: "genel" }, importance: "high" },
+      { homeTeam: { name: "Fenerbahçe", shortName: "FB", logoUrl: "", formLast5: "GGGGB" }, awayTeam: { name: "Samsunspor", shortName: "SAM", logoUrl: "", formLast5: "MBMGM" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-08T20:00:00+03:00")), stadium: "Fenerbahçe Şükrü Saracoğlu Stadyumu", status: "upcoming", odds: { home: 1.25, draw: 5.50, away: 11.00, source: "genel" }, importance: "high" },
+      { homeTeam: { name: "Başakşehir", shortName: "BAS", logoUrl: "", formLast5: "BGMBG" }, awayTeam: { name: "Göztepe", shortName: "GOZ", logoUrl: "", formLast5: "MGBGM" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-07T16:00:00+03:00")), stadium: "Başakşehir Fatih Terim Stadyumu", status: "upcoming", odds: { home: 1.85, draw: 3.40, away: 4.50, source: "genel" }, importance: "normal" },
+      { homeTeam: { name: "Gaziantep FK", shortName: "GFK", logoUrl: "", formLast5: "MMBGM" }, awayTeam: { name: "Fatih Karagümrük", shortName: "FKG", logoUrl: "", formLast5: "BGMMB" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-08T13:30:00+03:00")), stadium: "Gaziantep Stadyumu", status: "upcoming", odds: { home: 2.10, draw: 3.20, away: 3.60, source: "genel" }, importance: "normal" },
+      { homeTeam: { name: "Çaykur Rizespor", shortName: "RIZ", logoUrl: "", formLast5: "MMGBM" }, awayTeam: { name: "Antalyaspor", shortName: "ANT", logoUrl: "", formLast5: "BGMGB" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-08T13:30:00+03:00")), stadium: "Çaykur Didi Stadyumu", status: "upcoming", odds: { home: 2.30, draw: 3.10, away: 3.20, source: "genel" }, importance: "normal" },
+      { homeTeam: { name: "Konyaspor", shortName: "KON", logoUrl: "", formLast5: "MBMBB" }, awayTeam: { name: "Kasımpaşa", shortName: "KAS", logoUrl: "", formLast5: "MGMBG" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-08T16:00:00+03:00")), stadium: "Konya Büyükşehir Stadyumu", status: "upcoming", odds: { home: 2.00, draw: 3.30, away: 3.80, source: "genel" }, importance: "normal" },
+      { homeTeam: { name: "Eyüpspor", shortName: "EYP", logoUrl: "", formLast5: "BMBGM" }, awayTeam: { name: "Kocaelispor", shortName: "KOC", logoUrl: "", formLast5: "MBMBG" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-09T16:00:00+03:00")), stadium: "Recep Tayyip Erdoğan Stadyumu", status: "upcoming", odds: { home: 1.95, draw: 3.30, away: 4.00, source: "genel" }, importance: "normal" },
+      { homeTeam: { name: "Alanyaspor", shortName: "ALN", logoUrl: "", formLast5: "GMMBG" }, awayTeam: { name: "Gençlerbirliği", shortName: "GEN", logoUrl: "", formLast5: "MBGMM" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-09T20:00:00+03:00")), stadium: "Alanya Oba Stadyumu", status: "upcoming", odds: { home: 1.70, draw: 3.50, away: 5.00, source: "genel" }, importance: "normal" },
+      { homeTeam: { name: "Kayserispor", shortName: "KAY", logoUrl: "", formLast5: "MMMBM" }, awayTeam: { name: "Trabzonspor", shortName: "TS", logoUrl: "", formLast5: "GGBGG" }, league: "Süper Lig", leagueCountry: "TR", week: 25, matchDate: Timestamp.fromDate(new Date("2026-03-09T20:00:00+03:00")), stadium: "RHG Enertürk Enerji Stadyumu", status: "upcoming", odds: { home: 4.50, draw: 3.60, away: 1.80, source: "genel" }, importance: "normal" },
+    ];
+
+    window.seed = async function () {
+      const log = document.getElementById("log");
+      const btn = document.getElementById("btn");
+      btn.disabled = true;
+      log.textContent = "⏳ Maçlar ekleniyor...\n";
+      try {
+        const now = Timestamp.now();
+        for (const m of matches) {
+          await addDoc(collection(db, "matches"), { ...m, createdAt: now, updatedAt: now });
+          log.textContent += "✅ " + m.homeTeam.name + " vs " + m.awayTeam.name + "\n";
+        }
+        log.textContent += "\n🎉 " + matches.length + " maç başarıyla eklendi! Uygulamaya geri dönün.";
+      } catch (e) {
+        log.textContent += "❌ Hata: " + e.message + "\n";
+        btn.disabled = false;
+      }
+    };
+  </script>
+</body>
+
+</html>

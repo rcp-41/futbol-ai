@@ -1,17 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/datasources/gemini_datasource.dart';
 import '../../data/models/chat_message_model.dart';
 import '../../data/repositories/chat_repository.dart';
+import 'analysis_provider.dart' show geminiDatasourceProvider;
 
 // ═══ Repository Provider ═══
 
 final chatRepositoryProvider = Provider<ChatRepository>(
-  (ref) => ChatRepository(datasource: ref.watch(_datasourceProvider)),
-);
-
-final _datasourceProvider = Provider<GeminiDatasource>(
-  (ref) => GeminiDatasource(),
+  (ref) => ChatRepository(datasource: ref.watch(geminiDatasourceProvider)),
 );
 
 // ═══ Chat Messages Stream ═══

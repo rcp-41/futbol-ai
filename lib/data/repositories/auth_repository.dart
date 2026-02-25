@@ -26,6 +26,19 @@ class AuthRepository {
     return credential;
   }
 
+  /// Email/Password ile giriş
+  Future<UserCredential> signInWithEmail({
+    required String email,
+    required String password,
+  }) async {
+    final credential = await _auth.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    await _createOrUpdateUserProfile(credential.user!);
+    return credential;
+  }
+
   /// Çıkış
   Future<void> signOut() => _auth.signOut();
 

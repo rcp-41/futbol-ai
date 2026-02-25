@@ -1,0 +1,29 @@
+{
+    "project_info": {
+        "project_number": "911057238614",
+        "project_id": "futbol-ai-app",
+        "storage_bucket": "futbol-ai-app.firebasestorage.app"
+    },
+    "client": [
+        {
+            "client_info": {
+                "mobilesdk_app_id": "1:911057238614:android:b2603c22162fd99a2999f7",
+                "android_client_info": {
+                    "package_name": "com.futbolai.futbol_ai"
+                }
+            },
+            "oauth_client": [],
+            "api_key": [
+                {
+                    "current_key": "AIzaSyBoQnkT89-8vw5ao8j_YEia9x4IUDodSvw"
+                }
+            ],
+            "services": {
+                "appinvite_service": {
+                    "other_platform_oauth_client": []
+                }
+            }
+        }
+    ],
+    "configuration_version": "1"
+}

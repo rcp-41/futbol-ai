@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Sportoto Seed</title>
+</head>
+
+<body>
+    <h2>FutbolAI — Sportoto Seed</h2>
+    <button id="btn" onclick="seed()">🏆 Sportoto Maçlarını Çek</button>
+    <pre id="log"></pre>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, Timestamp, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.3.0/firebase-firestore.js";
+
+        const app = initializeApp({
+            apiKey: "AIzaSyCGzE8GvHi8AXGExwFCOayJu37L6q3wFcQ",
+            authDomain: "futbol-ai-app.firebaseapp.com",
+            projectId: "futbol-ai-app",
+            storageBucket: "futbol-ai-app.firebasestorage.app",
+            messagingSenderId: "911057238614",
+            appId: "1:911057238614:web:6dcba01f6d6735292999f7"
+        });
+        const db = getFirestore(app);
+
+        window.seed = async function () {
+            const log = document.getElementById("log");
+            document.getElementById("btn").disabled = true;
+            try {
+                log.textContent = "1/4 Haftalar cekiliyor...\n";
+                const rRes = await fetch("https://webapi.sportoto.gov.tr/api/GameRound?year=2025%2F2026&isPublished=true");
+                const rData = await rRes.json();
+                const rounds = rData.object || [];
+                const latest = rounds.reduce((a, b) => (a.id > b.id) ? a : b);
+                const wk = latest.roundNo || latest.round || rounds.indexOf(latest) + 1;
+                log.textContent += "OK Hafta " + wk + " (id:" + latest.id + ")\n";
+
+                log.textContent += "2/4 Maclar cekiliyor...\n";
+                const mRes = await fetch("https://webapi.sportoto.gov.tr/api/GameMatch/GetGameMatches/?gameRoundId=" + latest.id);
+                const mData = await mRes.json();
+                const matches = mData.object || [];
+                log.textContent += "OK " + matches.length + " mac\n";
+
+                log.textContent += "3/4 Eski veriler temizleniyor...\n";
+                const old = await getDocs(collection(db, "sportoto_matches"));
+                for (const d of old.docs) await deleteDoc(d.ref);
+
+                log.textContent += "4/4 Firestore'a yaziliyor...\n";
+                const now = Timestamp.now();
+                for (const sm of matches) {
+                    const m = sm.match || sm;
+                    const ht = m.homeTeam || {};
+                    const at = m.awayTeam || {};
+                    await addDoc(collection(db, "sportoto_matches"), {
+                        homeTeam: { name: ht.name || "", shortName: ht.shortName || "", logoUrl: "", formLast5: "" },
+                        awayTeam: { name: at.name || "", shortName: at.shortName || "", logoUrl: "", formLast5: "" },
+                        league: "Spor Toto", leagueCountry: "TR", week: wk,
+                        matchDate: Timestamp.fromDate(new Date(m.date)),
+                        stadium: "", status: "upcoming",
+                        score: null, odds: null, importance: "normal",
+                        orderNo: sm.orderNo || 0, roundId: latest.id,
+                        createdAt: now, updatedAt: now
+                    });
+                    log.textContent += "  " + (sm.orderNo || 0) + ". " + (ht.name || "?") + " vs " + (at.name || "?") + "\n";
+                }
+                log.textContent += "\n🎉 " + matches.length + " Sportoto maci eklendi!";
+            } catch (e) {
+                log.textContent += "HATA: " + e.message + "\n";
+                document.getElementById("btn").disabled = false;
+            }
+        };
+    </script>
+</body>
+
+</html>

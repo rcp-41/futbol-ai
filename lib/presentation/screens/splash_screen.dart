@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-
 import '../providers/matches_provider.dart';
 
-/// Splash Screen — Firebase init + anonim auth + route
+/// Splash Screen — Logo + Auth kontrolü → login veya home
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
@@ -34,21 +33,17 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   }
 
   Future<void> _initApp() async {
-    try {
-      // Anonim giriş
-      final auth = ref.read(authRepositoryProvider);
-      if (auth.currentUser == null) {
-        await auth.signInAnonymously();
-      }
-    } catch (_) {
-      // İlk açılışta hata olabilir, devam et
-    }
-
     // Minimum splash süresi
     await Future.delayed(const Duration(seconds: 2));
 
-    if (mounted) {
+    if (!mounted) return;
+
+    // Auth kontrolü — kullanıcı giriş yapmışsa home'a, değilse login'e git
+    final auth = ref.read(authRepositoryProvider);
+    if (auth.currentUser != null) {
       context.go('/home');
+    } else {
+      context.go('/login');
     }
   }
 

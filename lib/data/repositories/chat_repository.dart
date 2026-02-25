@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../datasources/gemini_datasource.dart';
 import '../models/chat_message_model.dart';
 
-/// Chat Repository — mesaj gönder, geçmiş yükle, temizle
+/// Chat Repository — mesaj gonder, Firestore'a kaydet, gecmis yukle, temizle
 class ChatRepository {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -29,8 +29,10 @@ class ChatRepository {
         .collection('messages');
   }
 
-  /// Mesaj geçmişini stream et
+  /// Mesaj gecmisini stream et
   Stream<List<ChatMessageModel>> streamMessages(String matchId) {
+    if (_userId == null) return Stream.value([]);
+
     return _messagesRef(matchId)
         .orderBy('timestamp', descending: false)
         .snapshots()
@@ -46,35 +48,74 @@ class ChatRepository {
             }).toList());
   }
 
-  /// AI'a mesaj gönder ve yanıt al
+  /// AI'a mesaj gonder ve yanit al — her iki mesaji da Firestore'a kaydet
   Future<String> sendMessage({
     required String matchId,
     required String message,
     List<ChatMessageModel>? history,
   }) async {
-    // History'yi Gemini formatına dönüştür
+    final userId = _userId;
+    if (userId == null) throw Exception('Oturum acilmamis.');
+
+    // 1. Kullanici mesajini Firestore'a kaydet
+    await _messagesRef(matchId).add({
+      'role': 'user',
+      'content': message,
+      'timestamp': FieldValue.serverTimestamp(),
+      'tokenCount': message.length ~/ 4, // yaklasik token tahmini
+    });
+
+    // 2. Mac verisini al (chat baglami icin)
+    Map<String, dynamic>? matchData;
+    try {
+      final matchDoc =
+          await _firestore.collection('matches').doc(matchId).get();
+      if (matchDoc.exists) {
+        matchData = matchDoc.data();
+      } else {
+        final sportotoDoc =
+            await _firestore.collection('sportoto_matches').doc(matchId).get();
+        if (sportotoDoc.exists) matchData = sportotoDoc.data();
+      }
+    } catch (_) {
+      // Mac verisi alinamazsa devam et
+    }
+
+    // 3. History'yi Gemini formatina donustur
     final historyMaps = history
         ?.map((m) => {'role': m.role, 'content': m.content})
         .toList();
 
-    // Cloud Function çağır — mesajları Firestore'a kaydeder
+    // 4. Gemini'den yanit al
     final response = await _datasource.sendChatMessage(
       matchId: matchId,
       message: message,
       history: historyMaps,
+      matchData: matchData,
     );
+
+    // 5. AI yanitini Firestore'a kaydet
+    await _messagesRef(matchId).add({
+      'role': 'assistant',
+      'content': response,
+      'timestamp': FieldValue.serverTimestamp(),
+      'tokenCount': response.length ~/ 4,
+    });
 
     return response;
   }
 
-  /// Bugün gönderilen mesaj sayısını getir
+  /// Bugun gonderilen mesaj sayisini getir
   Future<int> getTodayMessageCount(String matchId) async {
+    if (_userId == null) return 0;
+
     final today = DateTime.now();
     final startOfDay = DateTime(today.year, today.month, today.day);
 
     final snap = await _messagesRef(matchId)
         .where('role', isEqualTo: 'user')
-        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+        .where('timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
         .count()
         .get();
 
@@ -83,6 +124,8 @@ class ChatRepository {
 
   /// Sohbeti temizle
   Future<void> clearChat(String matchId) async {
+    if (_userId == null) return;
+
     final snap = await _messagesRef(matchId).get();
     final batch = _firestore.batch();
     for (final doc in snap.docs) {

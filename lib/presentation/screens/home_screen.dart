@@ -52,7 +52,7 @@ class HomeScreen extends ConsumerWidget {
               // Ayarlar
               IconButton(
                 icon: const Icon(Icons.settings_rounded),
-                onPressed: () => context.push('/settings'),
+                onPressed: () => context.go('/settings'),
                 tooltip: 'Ayarlar',
               ),
               const SizedBox(width: 8),
