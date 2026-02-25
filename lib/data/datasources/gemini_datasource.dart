@@ -8,7 +8,7 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 /// NOT: Produksiyonda API key Firebase Cloud Function proxy arkasina alinmalidir (SPEC.md Bolum 3.1)
 class GeminiDatasource {
   // TODO: Produksiyonda bu key Firebase Cloud Functions defineSecret() ile tasinmali
-  static const _apiKey = 'AIzaSyB7c11m-H8YaQMLh5tH95vY56B3KhOy5jg';
+  static const _apiKey = 'AIzaSyAzs3FaIZNIPiRF1tCKJhLpCoHzzG74_Os';
   static const _modelName = 'gemini-2.0-flash';
 
   late final GenerativeModel _model;
