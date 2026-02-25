@@ -9,7 +9,7 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 class GeminiDatasource {
   // TODO: Produksiyonda bu key Firebase Cloud Functions defineSecret() ile tasinmali
   static const _apiKey = 'AIzaSyCGzE8GvHi8AXGExwFCOayJu37L6q3wFcQ';
-  static const _modelName = 'gemini-2.5-flash-preview-04-17';
+  static const _modelName = 'gemini-2.0-flash';
 
   late final GenerativeModel _model;
   late final GenerativeModel _chatModel;

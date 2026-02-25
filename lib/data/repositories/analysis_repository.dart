@@ -42,7 +42,7 @@ class AnalysisRepository {
         'matchId': matchId,
         'userId': userId,
         'status': 'completed',
-        'modelUsed': 'gemini-2.5-flash-preview-04-17',
+        'modelUsed': 'gemini-2.0-flash',
       });
     } catch (e) {
       debugPrint('[Analysis] fromJson parse hatasi: $e');
@@ -51,7 +51,7 @@ class AnalysisRepository {
         matchId: matchId,
         userId: userId,
         status: 'completed',
-        modelUsed: 'gemini-2.5-flash-preview-04-17',
+        modelUsed: 'gemini-2.0-flash',
         prediction: _extractPrediction(result),
         detailedNarrative: result['detailedNarrative']?.toString() ??
             result['rawGeminiResponse']?.toString() ??
@@ -121,7 +121,7 @@ class AnalysisRepository {
       'refereeImpact': analysis.refereeImpact,
       'detailedNarrative': analysis.detailedNarrative,
       'rawGeminiResponse': rawResult.toString(),
-      'modelUsed': 'gemini-2.5-flash-preview-04-17',
+      'modelUsed': 'gemini-2.0-flash',
       'createdAt': FieldValue.serverTimestamp(),
       'expiresAt': Timestamp.fromDate(
         DateTime.now().add(const Duration(hours: 24)),
