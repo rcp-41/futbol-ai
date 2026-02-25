@@ -58,8 +58,13 @@ class GeminiDatasource {
     final matchData = doc.data() as Map<String, dynamic>;
     final prompt = _buildAnalysisPrompt(matchData);
 
-    // Gemini API cagrisi
-    final response = await _model.generateContent([Content.text(prompt)]);
+    // Gemini API cagrisi — 90 saniye timeout
+    final response = await _model
+        .generateContent([Content.text(prompt)])
+        .timeout(
+          const Duration(seconds: 90),
+          onTimeout: () => throw Exception('Analiz zaman asimina ugradi (90s). Tekrar deneyin.'),
+        );
     final rawText = response.text ?? '';
 
     if (rawText.isEmpty) {

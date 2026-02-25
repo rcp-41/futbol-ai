@@ -32,26 +32,60 @@ class AnalysisRepository {
 
     // 2. API cagrisi
     final result = await _datasource.requestAnalysis(matchId);
+    debugPrint('[Analysis] Gemini yanit alindi, parse ediliyor...');
 
-    // 3. Parse
-    final analysis = AnalysisModel.fromJson({
-      ...result,
-      'matchId': matchId,
-      'userId': userId,
-      'status': 'completed',
-      'modelUsed': 'gemini-2.5-flash-preview-04-17',
-    });
+    // 3. Parse — hata olursa fallback model kullan
+    AnalysisModel analysis;
+    try {
+      analysis = AnalysisModel.fromJson({
+        ...result,
+        'matchId': matchId,
+        'userId': userId,
+        'status': 'completed',
+        'modelUsed': 'gemini-2.5-flash-preview-04-17',
+      });
+    } catch (e) {
+      debugPrint('[Analysis] fromJson parse hatasi: $e');
+      // Fallback: en azindan prediction ve narrative'i goster
+      analysis = AnalysisModel(
+        matchId: matchId,
+        userId: userId,
+        status: 'completed',
+        modelUsed: 'gemini-2.5-flash-preview-04-17',
+        prediction: _extractPrediction(result),
+        detailedNarrative: result['detailedNarrative']?.toString() ??
+            result['rawGeminiResponse']?.toString() ??
+            'Analiz tamamlandi ancak veri formati beklenenden farkli.',
+      );
+    }
 
-    // 4. Firestore'a cache'le
+    // 4. Firestore'a cache'le (hata olsa bile analizi don)
     try {
       await _saveAnalysisToFirestore(analysis, matchId, userId, result);
       debugPrint('[Analysis] Firestore cache kaydedildi: $matchId');
     } catch (e) {
       debugPrint('[Analysis] Firestore cache kaydi basarisiz: $e');
-      // Cache kaydi basarisiz olsa bile analiz sonucunu don
     }
 
     return analysis;
+  }
+
+  /// Raw JSON'dan prediction cikarmaya calis
+  PredictionModel? _extractPrediction(Map<String, dynamic> raw) {
+    try {
+      final pred = raw['prediction'];
+      if (pred is Map<String, dynamic>) {
+        return PredictionModel(
+          result: pred['result']?.toString() ?? '?',
+          resultLabel: pred['resultLabel']?.toString() ?? 'Bilinmiyor',
+          confidence: (pred['confidence'] as num?)?.toDouble() ?? 0.5,
+          surpriseAlert: pred['surpriseAlert'] == true,
+          bankoLevel: pred['bankoLevel']?.toString() ?? 'RISKLI',
+          mainReason: pred['mainReason']?.toString() ?? '',
+        );
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Analiz sonucunu Firestore'a kaydet (cache)
