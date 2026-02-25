@@ -22,7 +22,11 @@ class AuthRepository {
   /// Anonim giriş
   Future<UserCredential> signInAnonymously() async {
     final credential = await _auth.signInAnonymously();
-    await _createOrUpdateUserProfile(credential.user!);
+    try {
+      await _createOrUpdateUserProfile(credential.user!);
+    } catch (_) {
+      // Profil yazımı başarısız olsa bile giriş devam etsin
+    }
     return credential;
   }
 
@@ -35,7 +39,11 @@ class AuthRepository {
       email: email,
       password: password,
     );
-    await _createOrUpdateUserProfile(credential.user!);
+    try {
+      await _createOrUpdateUserProfile(credential.user!);
+    } catch (_) {
+      // Profil yazımı başarısız olsa bile giriş devam etsin
+    }
     return credential;
   }
 
