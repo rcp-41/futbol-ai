@@ -1,0 +1,64 @@
+name: Deploy — Firebase + Shorebird
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-firebase:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy Firestore Rules
+        run: firebase deploy --only firestore:rules
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Deploy Cloud Functions
+        run: |
+          cd functions
+          npm ci
+          cd ..
+          firebase deploy --only functions
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+  deploy-shorebird-patch:
+    needs: deploy-firebase
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+
+      - name: Setup Shorebird
+        uses: shorebirdtech/setup-shorebird@v1
+        with:
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Shorebird Patch Android
+        run: shorebird patch android --allow-native-diffs --allow-asset-diffs
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+        continue-on-error: true
+
+      - name: Shorebird Patch iOS
+        run: shorebird patch ios --allow-native-diffs --allow-asset-diffs
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+        continue-on-error: true
