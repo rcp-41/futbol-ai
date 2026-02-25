@@ -4,7 +4,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../providers/theme_provider.dart';
 import '../widgets/common/update_checker.dart';
-import '../../core/services/update_service.dart';
 
 /// Ayarlar sayfası — SPEC.md Bölüm 14.6 wireframe
 class SettingsScreen extends ConsumerWidget {
@@ -65,21 +64,6 @@ class SettingsScreen extends ConsumerWidget {
                   info != null
                       ? 'v${info.version}+${info.buildNumber}'
                       : '...',
-                  style: theme.textTheme.bodyMedium,
-                ),
-              );
-            },
-          ),
-
-          // Patch versiyonu
-          FutureBuilder<int?>(
-            future: ref.read(updateServiceProvider).currentPatchNumber,
-            builder: (context, snapshot) {
-              return ListTile(
-                leading: const Icon(Icons.healing_rounded),
-                title: const Text('Patch Versiyonu'),
-                trailing: Text(
-                  snapshot.data != null ? '#${snapshot.data}' : '-',
                   style: theme.textTheme.bodyMedium,
                 ),
               );
