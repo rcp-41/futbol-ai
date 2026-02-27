@@ -86,7 +86,7 @@ export const analyzeMatch = onCall(
             // Call Gemini API with search grounding
             const apiKey = GEMINI_API_KEY.value();
             const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${apiKey}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -132,7 +132,7 @@ export const analyzeMatch = onCall(
                 ...analysisData,
                 status: 'completed',
                 rawGeminiResponse: rawText,
-                modelUsed: 'gemini-1.5-pro',
+                modelUsed: 'gemini-3.1-pro-preview',
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                 expiresAt: admin.firestore.Timestamp.fromDate(
                     new Date(Date.now() + 24 * 60 * 60 * 1000)
