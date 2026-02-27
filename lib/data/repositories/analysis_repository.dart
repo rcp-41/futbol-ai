@@ -42,7 +42,7 @@ class AnalysisRepository {
         'matchId': matchId,
         'userId': userId,
         'status': 'completed',
-        'modelUsed': 'gemini-2.0-flash',
+        'modelUsed': 'gemini-1.5-pro',
       });
     } catch (e) {
       debugPrint('[Analysis] fromJson parse hatasi: $e');
@@ -51,7 +51,7 @@ class AnalysisRepository {
         matchId: matchId,
         userId: userId,
         status: 'completed',
-        modelUsed: 'gemini-2.0-flash',
+        modelUsed: 'gemini-1.5-pro',
         prediction: _extractPrediction(result),
         detailedNarrative: result['detailedNarrative']?.toString() ??
             result['rawGeminiResponse']?.toString() ??
