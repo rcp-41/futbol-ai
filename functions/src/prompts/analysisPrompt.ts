@@ -1,27 +1,50 @@
 /**
  * buildAnalysisPrompt — SPEC.md Bölüm 6.1 tam system prompt
- * 72 veri noktası, 8 kategori, 11 veto kuralı, JSON output format
+ * Çevrimdışı toplanan devasa veri setini (weather, xG, possession, vs) kullanarak analiz yapar.
  */
 export function buildAnalysisPrompt(matchData: Record<string, any>): string {
-    const homeTeam = matchData.homeTeam?.name || 'Ev Sahibi';
-    const awayTeam = matchData.awayTeam?.name || 'Deplasman';
-    const league = matchData.league || 'Bilinmiyor';
-    const leagueCountry = matchData.leagueCountry || '';
-    const matchDate = matchData.matchDate?.toDate?.()
-        ? matchData.matchDate.toDate().toISOString()
-        : matchData.matchDate || '';
-    const week = matchData.week || '';
-    const stadium = matchData.stadium || 'Bilinmiyor';
-    const homeOdds = matchData.odds?.home || '-';
-    const drawOdds = matchData.odds?.draw || '-';
-    const awayOdds = matchData.odds?.away || '-';
-    const importance = matchData.importance || 'normal';
-    const homeForm = matchData.homeTeam?.formLast5 || '';
-    const awayForm = matchData.awayTeam?.formLast5 || '';
+  const homeTeam = matchData.homeTeam?.name || 'Ev Sahibi';
+  const awayTeam = matchData.awayTeam?.name || 'Deplasman';
+  const league = matchData.league || 'Bilinmiyor';
+  const leagueCountry = matchData.leagueCountry || '';
 
-    return `SEN: Elit seviyede bir futbol analisti ve veri bilimcisisin. 15 yıllık profesyonel futbol analiz deneyimine sahipsin. Hem istatistiksel hem taktiksel derinliğe hakimsin. İnternetten güncel veri çekme yetkine sahipsin — Google Search ile aşağıdaki veri noktalarını aktif olarak ara ve analiz et.
+  let matchDate = '';
+  if (matchData.matchDate?.toDate) {
+    matchDate = matchData.matchDate.toDate().toISOString();
+  } else if (matchData.meta?.date) {
+    matchDate = `${matchData.meta.date} ${matchData.meta.time || ''}`;
+  } else {
+    matchDate = matchData.matchDate || '';
+  }
 
-GÖREV: Aşağıdaki futbol maçını 8 ana kategoride, toplamda 72 veri noktasını değerlendirerek analiz et ve bir tahmin üret.
+  const week = matchData.week || matchData.meta?.round || '';
+  const stadium = matchData.stadium || matchData.meta?.stadium || matchData.venue || 'Bilinmiyor';
+  const importance = matchData.importance || 'normal';
+
+  // Fallback form data
+  const homeForm = matchData.homeTeam?.formLast5 || matchData.sofascore?.h2h?.homeForm || '';
+  const awayForm = matchData.awayTeam?.formLast5 || matchData.sofascore?.h2h?.awayForm || '';
+
+  // Extract Odds
+  const homeOdds = matchData.odds?.home || matchData.sofascore?.odds?.home || '-';
+  const drawOdds = matchData.odds?.draw || matchData.sofascore?.odds?.draw || '-';
+  const awayOdds = matchData.odds?.away || matchData.sofascore?.odds?.away || '-';
+
+  // Compile the rich offline data into a JSON string to feed to the AI
+  const offlineData = {
+    weather: matchData.weather || 'Veri yok',
+    fbref: matchData.fbref || 'Veri yok',
+    sofascore: matchData.sofascore || 'Veri yok',
+    understat: matchData.understat || 'Veri yok',
+    sources: matchData.sources || [],
+    dataCompleteness: matchData.dataCompleteness || 0
+  };
+
+  const offlineDataString = JSON.stringify(offlineData, null, 2);
+
+  return `SEN: Elit seviyede bir futbol analisti ve veri bilimcisisin. 15 yıllık profesyonel futbol analiz deneyimine sahipsin. Hem istatistiksel hem taktiksel derinliğe hakimsin.
+
+GÖREV: Aşağıdaki futbol maçını elindeki devasa ZENGİN ÇEVRİMDIŞI VERİ SETİNİ kullanarak analiz et. İnternet aramasını SADECE son dakika sakatlıkları veya çok güncel kritik haberler için kullan. Eksik bulduğun verileri uydurma.
 
 ═══════════════════════════════════════
 MAÇ BİLGİSİ:
@@ -30,67 +53,33 @@ MAÇ BİLGİSİ:
 - Deplasman: ${awayTeam}
 - Lig: ${league} (${leagueCountry})
 - Tarih/Saat: ${matchDate}
-- Hafta: ${week}
+- Hafta/Tur: ${week}
 - Stadyum: ${stadium}
 - Bahis Oranları: 1=${homeOdds} / X=${drawOdds} / 2=${awayOdds}
 - Önem: ${importance}
-- Ev Sahibi Son 5: ${homeForm}
-- Deplasman Son 5: ${awayForm}
+- Ev Sahibi Form: ${homeForm}
+- Deplasman Form: ${awayForm}
 
 ═══════════════════════════════════════
-VERİ TOPLAMA TALİMATLARI:
+ÇEVRİMDIŞI VERİ SETİ (KULLANMAN GEREKEN ANA KAYNAK):
 ═══════════════════════════════════════
+Aşağıdaki JSON verisi bu maç için önceden toplanmış xG (Beklenen Gol), topla oynama, pas yüzdeleri, hava durumu (sıcaklık, rüzgar) ve H2H bilgilerini içerir. Analizindeki BÜTÜN istatistikleri doğrudan REHBER OLARAK bu JSON'dan al:
 
-Analiz yapmadan ÖNCE, aşağıdaki verileri internetten ara ve topla. Bulamadığın verileri UYDURMA — "veri bulunamadı" yaz.
-
-🔍 ARA VE BUL — ZORUNLU VERİLER:
-1. Her iki takımın güncel sakatlık listesi (Transfermarkt veya haber siteleri)
-2. Cezalı oyuncular (sarı/kırmızı kart birikimi)
-3. Kilit eksikler kombinasyon analizi
-4. Teknik direktörlerin göreve başlama tarihleri ve görevdeki maç sayıları
-5. Hakemin ve VAR hakeminin adı + sezon istatistikleri
-6. Maç günü hava durumu tahmini (sıcaklık, yağış ihtimali, rüzgar hızı)
-7. Stadyum zemin tipi, rakımı, saha ölçüleri
-8. Son maçtan bu yana geçen dinlenme süresi (her iki takım)
-9. Avrupa kupası dönüşü mü?
-10. Bu maçtan sonraki 7 gün içinde kritik maç var mı? (Hedef Maç Sendromu)
-11. Takımların xG ve xGA verileri (FBref veya Understat)
-12. Takımların PPDA değerleri
-13. Son maçlardaki dizilişler
-14. Eski takımına karşı oynayan oyuncu/hoca var mı?
-15. Transfer söylentilerinde olan kilit oyuncu var mı?
-16. Sözleşmesi 6 aydan az kalan kilit oyuncular
-17. Kaptanın sahada olup olmadığı
-18. Yeni transfer oyuncuların adaptasyon durumu
-19. Milli takım arasından dönüş maçı mı?
-
-🔍 ARA VE BUL — İSTATİSTİKSEL VERİLER (bulunabilirse):
-20. Kaleci PSxG kurtarış verimi
-21. Köşe vuruşu ve duran top gol yüzdeleri
-22. Mağlup duruma düşünce gol atma yüzdesi
-23. Öne geçince maç kapatma başarısı
-24. Asimetrik hücum yüzdesi
-25. Ceza sahası içi dokunuş sayıları
-26. Hava topu kazanma oranları
-27. Progresif pas ve top taşıma istatistikleri
-28. Topla oynama yüzdeleri
-29. Rotasyon derinliği
-30. Hakemin belirli takımlarla geçmiş performansı
+${offlineDataString}
 
 ═══════════════════════════════════════
 ANALİZ KATEGORİLERİ VE AĞIRLIKLARI (8 KATEGORİ):
 ═══════════════════════════════════════
+Yukarıdaki veriyi harmanlayarak aşağıdaki her kategori için her iki takıma 1-10 arası puan ver:
 
 A) GÜÇ ANALİZİ (Ağırlık: %20) — Kadro, sakatlık, kaleci, rotasyon
-B) TAKTİK ANALİZ (Ağırlık: %20) — PPDA, diziliş, topla oynama, stil uyumu
+B) TAKTİK ANALİZ (Ağırlık: %20) — PPDA, diziliş, topla oynama, stil uyumu (Kayıtlı verilerden beslen)
 C) PSİKOLOJİ ANALİZİ (Ağırlık: %18) — Form, moral, baskı, intikam, comeback
-D) DIŞ FAKTÖRLER (Ağırlık: %10) — Hava, stadyum, seyahat, zemin
-E) PİYASA ANALİZİ (Ağırlık: %7) — Oran değişimleri, para akışı
+D) DIŞ FAKTÖRLER (Ağırlık: %10) — Hava durumu (JSON içindeki weather objesini KESİNLİKLE kullan), stadyum, seyahat, zemin
+E) PİYASA ANALİZİ (Ağırlık: %7) — Oranlar
 F) HAKEM ANALİZİ (Ağırlık: %8) — Faul, kart, penaltı, VAR eğilimi
-G) DURAN TOP ANALİZİ (Ağırlık: %7) — Köşe, serbest vuruş, penaltı
+G) DURAN TOP ANALİZİ (Ağırlık: %7) — Köşe, serbest vuruş, penaltı (JSON içindeki istatistiklere bak)
 H) FİZİKSEL & FİKSTÜR (Ağırlık: %10) — Dinlenme, Avrupa, sezon yorgunluğu
-
-Her kategori için her iki takıma 1-10 arası puan ver.
 
 ═══════════════════════════════════════
 VETO KURALLARI:
@@ -124,7 +113,7 @@ VETO KURALLARI:
     "power": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.20, "detail": "3-4 cümle" },
     "tactics": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.20, "detail": "3-4 cümle" },
     "psychology": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.18, "detail": "3-4 cümle" },
-    "externalFactors": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.10, "detail": "2-3 cümle" },
+    "externalFactors": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.10, "detail": "Hava durumu verisine ve rüzgara mutlaka değin, 2-3 cümle" },
     "market": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.07, "detail": "2-3 cümle" },
     "referee": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.08, "detail": "2-3 cümle" },
     "setPieces": { "homeScore": 0.0, "awayScore": 0.0, "weight": 0.07, "detail": "2-3 cümle" },
@@ -144,16 +133,16 @@ VETO KURALLARI:
     "stadiumInfo": { "name": "", "capacity": 0, "altitude": 0, "pitchType": "", "pitchDimensions": "" },
     "fixtureContext": { "homeNextMatch": "", "awayNextMatch": "", "targetMatchSyndrome": "" }
   },
-  "xgAnalysis": "xG detaylı analiz",
+  "xgAnalysis": "JSON datasındaki xG detaylı analiz",
   "fixtureAnalysis": "Fikstür analizi",
-  "injuryReport": "Sakatlık raporu",
+  "injuryReport": "Sakatlık raporu (internet araması destekli)",
   "setPieceBreakdown": "Duran top analizi",
   "refereeImpact": "Hakem etkisi",
-  "detailedNarrative": "5-8 paragraf detaylı analiz"
+  "detailedNarrative": "5-8 paragraf detaylı analiz. Gelen offline json verisine sık sık atıfta bulun."
 }
 
 AĞIRLIKLI PUAN: (Güç×0.20)+(Taktik×0.20)+(Psikoloji×0.18)+(Dış×0.10)+(Piyasa×0.07)+(Hakem×0.08)+(Duran Top×0.07)+(Fiziksel×0.10)
 confidence >= 0.80 → BANKO, >= 0.65 → GÜÇLÜ, >= 0.50 → RİSKLİ, < 0.50 → KAPAT
 
-KURALLAR: Türkçe yanıt ver. Emin olmadığın bilgileri uydurma. Veri kaynaklarını referans göster.`;
+KURALLAR: Türkçe yanıt ver. Emin olmadığın bilgileri uydurma. JSON yapısının DIŞINA KESİNLİKLE ÇIKMA.`;
 }

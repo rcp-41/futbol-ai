@@ -104,7 +104,7 @@ export const analyzeMatch = onCall(
                                 google_search_retrieval: {
                                     dynamic_retrieval_config: {
                                         mode: 'MODE_DYNAMIC',
-                                        dynamic_threshold: 0.3,
+                                        dynamic_threshold: 0.7,
                                     },
                                 },
                             },
