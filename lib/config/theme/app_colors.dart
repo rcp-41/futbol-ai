@@ -6,6 +6,7 @@ class AppColors {
 
   // ═══ Dark Theme ═══
   static const Color primaryColor = Color(0xFF6C63FF);
+  static const Color primary = primaryColor; // alias
   static const Color accentColor = Color(0xFF00E5FF);
   static const Color backgroundColor = Color(0xFF0D1117);
   static const Color surfaceColor = Color(0xFF161B22);
@@ -16,6 +17,14 @@ class AppColors {
   static const Color textPrimary = Color(0xFFF0F6FC);
   static const Color textSecondary = Color(0xFF8B949E);
   static const Color textMuted = Color(0xFF484F58);
+  
+  // ═══ Semantic Aliases ═══
+  static const Color success = successColor;
+  static const Color warning = warningColor;
+  static const Color error = dangerColor;
+  static const Color surface = surfaceColor;
+  static const Color surfaceVariant = Color(0xFF1E2430);
+  static const Color border = cardBorderColor;
 
   // ═══ Light Theme ═══
   static const Color lightBg = Color(0xFFF6F8FA);

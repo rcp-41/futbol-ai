@@ -48,7 +48,6 @@ pubspec.lock
 # *.g.dart          # commit'lenmeli
 
 ## Web related
-lib/generated_plugin_registrant.dart
 
 ## Android
 **/android/**/gradle-wrapper.jar

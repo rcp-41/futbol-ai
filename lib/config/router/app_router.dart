@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/services/analytics_service.dart';
 import '../../presentation/screens/splash_screen.dart';
 import '../../presentation/screens/login_screen.dart';
 import '../../presentation/screens/home_screen.dart';
 import '../../presentation/screens/sportoto_screen.dart';
 import '../../presentation/screens/settings_screen.dart';
+import '../../presentation/screens/leagues_screen.dart';
+import '../../presentation/screens/league_overview_screen.dart';
+import '../../presentation/screens/team_profile_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -14,6 +18,7 @@ final _shellNavigatorKey = GlobalKey<NavigatorState>();
 final GoRouter appRouter = GoRouter(
   navigatorKey: _rootNavigatorKey,
   initialLocation: '/splash',
+  observers: [AnalyticsService.observer],
   routes: [
     GoRoute(
       path: '/splash',
@@ -25,6 +30,23 @@ final GoRouter appRouter = GoRouter(
       parentNavigatorKey: _rootNavigatorKey,
       builder: (context, state) => const LoginScreen(),
     ),
+
+    // Full-screen routes (outside shell)
+    GoRoute(
+      path: '/team/:slug',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => TeamProfileScreen(
+        teamSlug: state.pathParameters['slug']!,
+      ),
+    ),
+    GoRoute(
+      path: '/league/:key',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => LeagueOverviewScreen(
+        leagueKey: state.pathParameters['key']!,
+      ),
+    ),
+
     ShellRoute(
       navigatorKey: _shellNavigatorKey,
       builder: (context, state, child) => MainShell(child: child),
@@ -32,6 +54,10 @@ final GoRouter appRouter = GoRouter(
         GoRoute(
           path: '/home',
           builder: (context, state) => const HomeScreen(),
+        ),
+        GoRoute(
+          path: '/leagues',
+          builder: (context, state) => const LeaguesScreen(),
         ),
         GoRoute(
           path: '/sportoto',
@@ -46,17 +72,33 @@ final GoRouter appRouter = GoRouter(
   ],
   errorBuilder: (context, state) => Scaffold(
     body: Center(
-      child: Text('Sayfa bulunamadı: ${state.error}'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.error_outline, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          Text(
+            'Sayfa bulunamadı',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: () => context.go('/home'),
+            icon: const Icon(Icons.home_rounded),
+            label: const Text('Ana Sayfaya Dön'),
+          ),
+        ],
+      ),
     ),
   ),
 );
 
-/// Bottom Navigation Shell
+/// Bottom Navigation Shell — updated with Leagues tab
 class MainShell extends StatelessWidget {
   final Widget child;
   const MainShell({required this.child, super.key});
 
-  static const _tabs = ['/home', '/sportoto', '/settings'];
+  static const _tabs = ['/home', '/leagues', '/sportoto', '/settings'];
 
   int _currentIndex(BuildContext context) {
     final location = GoRouterState.of(context).matchedLocation;
@@ -85,6 +127,11 @@ class MainShell extends StatelessWidget {
           NavigationDestination(
             icon: Icon(Icons.emoji_events_outlined),
             selectedIcon: Icon(Icons.emoji_events),
+            label: 'Ligler',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
             label: 'Spor Toto',
           ),
           NavigationDestination(

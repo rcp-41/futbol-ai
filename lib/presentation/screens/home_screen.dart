@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../providers/matches_provider.dart';
 import '../providers/theme_provider.dart';
 
 import '../widgets/home/week_selector.dart';
@@ -18,7 +19,12 @@ class HomeScreen extends ConsumerWidget {
     final themeMode = ref.watch(themeProvider);
 
     return Scaffold(
-      body: CustomScrollView(
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(matchesProvider);
+          ref.invalidate(availableWeeksProvider);
+        },
+        child: CustomScrollView(
         slivers: [
           // ═══ AppBar ═══
           SliverAppBar(
@@ -72,6 +78,7 @@ class HomeScreen extends ConsumerWidget {
           // ═══ Maç Listesi ═══
           const MatchList(),
         ],
+        ),
       ),
     );
   }

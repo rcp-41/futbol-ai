@@ -30,21 +30,28 @@ export function buildAnalysisPrompt(matchData: Record<string, any>): string {
   const drawOdds = matchData.odds?.draw || matchData.sofascore?.odds?.draw || '-';
   const awayOdds = matchData.odds?.away || matchData.sofascore?.odds?.away || '-';
 
-  // Compile the rich offline data into a JSON string to feed to the AI
-  const offlineData = {
-    weather: matchData.weather || 'Veri yok',
-    fbref: matchData.fbref || 'Veri yok',
-    sofascore: matchData.sofascore || 'Veri yok',
-    understat: matchData.understat || 'Veri yok',
-    sources: matchData.sources || [],
-    dataCompleteness: matchData.dataCompleteness || 0
-  };
+  // [P-09] Compile offline data — only include non-null fields to reduce token count
+  const offlineData: Record<string, unknown> = {};
+  if (matchData.weather) offlineData.weather = matchData.weather;
+  if (matchData.fbref) offlineData.fbref = matchData.fbref;
+  if (matchData.sofascore) offlineData.sofascore = matchData.sofascore;
+  if (matchData.understat) offlineData.understat = matchData.understat;
+  if (matchData.sources?.length) offlineData.sources = matchData.sources;
+  offlineData.dataCompleteness = matchData.dataCompleteness || 0;
 
-  const offlineDataString = JSON.stringify(offlineData, null, 2);
+  const hasRichData = Object.keys(offlineData).length > 2; // More than just dataCompleteness + maybe one empty field
+  const offlineDataString = hasRichData
+    ? JSON.stringify(offlineData, null, 2)
+    : 'Çevrimdışı veri bulunamadı.';
+
+  // Dynamic task instruction based on data availability
+  const taskInstruction = hasRichData
+    ? `GÖREV: Aşağıdaki futbol maçını elindeki ZENGİN ÇEVRİMDIŞI VERİ SETİNİ kullanarak analiz et. Tüm analizini SADECE bu verilere dayandır. Eksik bulduğun verileri uydurma.`
+    : `GÖREV: Aşağıdaki futbol maçını analiz et. ÇEVRİMDIŞI VERİ SETİ BOŞTUR — kendi futbol bilgine dayandır. Bu takımların lig sıralaması, son form durumu, gol istatistikleri ve kadro bilgilerini KENDİ BİLGİNE ve EĞİTİM VERİLERİNE göre değerlendir. Emin olmadığın bilgileri KESINLIKLE uydurma. Bildiğin bilgileri kullanmaktan çekinme.`;
 
   return `SEN: Elit seviyede bir futbol analisti ve veri bilimcisisin. 15 yıllık profesyonel futbol analiz deneyimine sahipsin. Hem istatistiksel hem taktiksel derinliğe hakimsin.
 
-GÖREV: Aşağıdaki futbol maçını elindeki devasa ZENGİN ÇEVRİMDIŞI VERİ SETİNİ kullanarak analiz et. İnternet aramasını SADECE son dakika sakatlıkları veya çok güncel kritik haberler için kullan. Eksik bulduğun verileri uydurma.
+${taskInstruction}
 
 ═══════════════════════════════════════
 MAÇ BİLGİSİ:
@@ -135,14 +142,18 @@ VETO KURALLARI:
   },
   "xgAnalysis": "JSON datasındaki xG detaylı analiz",
   "fixtureAnalysis": "Fikstür analizi",
-  "injuryReport": "Sakatlık raporu (internet araması destekli)",
+  "injuryReport": "Sakatlık raporu (çevrimdışı veri destekli)",
   "setPieceBreakdown": "Duran top analizi",
   "refereeImpact": "Hakem etkisi",
-  "detailedNarrative": "5-8 paragraf detaylı analiz. Gelen offline json verisine sık sık atıfta bulun."
+  "detailedNarrative": "5-8 paragraf detaylı analiz. ${hasRichData ? 'Gelen offline json verisine sık sık atıfta bulun.' : 'Kendi futbol bilgine ve eğitim verilerine dayandır.'}"
 }
 
 AĞIRLIKLI PUAN: (Güç×0.20)+(Taktik×0.20)+(Psikoloji×0.18)+(Dış×0.10)+(Piyasa×0.07)+(Hakem×0.08)+(Duran Top×0.07)+(Fiziksel×0.10)
 confidence >= 0.80 → BANKO, >= 0.65 → GÜÇLÜ, >= 0.50 → RİSKLİ, < 0.50 → KAPAT
 
-KURALLAR: Türkçe yanıt ver. Emin olmadığın bilgileri uydurma. JSON yapısının DIŞINA KESİNLİKLE ÇIKMA.`;
+KRİTİK KURALLAR:
+1. Türkçe yanıt ver. Emin olmadığın bilgileri uydurma. JSON yapısının DIŞINA KESİNLİKLE ÇIKMA.
+2. confidence değeri HİÇBİR ZAMAN 0.45'in altında olamaz. Veri az olsa bile en az 0.45 ver. Futbol bilgin ve çevrimdışı veri setin yeterlidir.
+3. Kategori puanları KESİNLİKLE farklılaşmalıdır. Her iki takıma da aynı puanı (örn. 5/5) vermek YASAKTIR. Her kategoride en az 0.5 puan fark olmalıdır. Gerçekçi ve çeşitli puanlar ver.
+4. Her kategoride detaylı açıklama ZORUNLUDUR. "Veri bulunamadı" yazmak YASAKTIR — kendi bilgini kullan.`;
 }

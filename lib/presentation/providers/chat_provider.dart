@@ -1,41 +1,41 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../config/constants/app_constants.dart';
+import '../../core/services/analytics_service.dart';
 import '../../data/models/chat_message_model.dart';
 import '../../data/repositories/chat_repository.dart';
-import 'analysis_provider.dart' show geminiDatasourceProvider;
+import 'core_providers.dart';
 
 // ═══ Repository Provider ═══
 
+/// [A-06] FIX: geminiDatasourceProvider artık core_providers.dart'tan geliyor
 final chatRepositoryProvider = Provider<ChatRepository>(
   (ref) => ChatRepository(datasource: ref.watch(geminiDatasourceProvider)),
 );
 
 // ═══ Chat Messages Stream ═══
 
+/// [P-05] autoDispose eklendi
 final chatMessagesProvider =
-    StreamProvider.family<List<ChatMessageModel>, String>((ref, matchId) {
+    StreamProvider.autoDispose.family<List<ChatMessageModel>, String>((ref, matchId) {
   return ref.watch(chatRepositoryProvider).streamMessages(matchId);
 });
 
 // ═══ Remaining Messages ═══
 
 final chatRemainingProvider =
-    FutureProvider.family<int, String>((ref, matchId) async {
-  const maxDaily = 20;
+    FutureProvider.autoDispose.family<int, String>((ref, matchId) async {
   final count =
       await ref.watch(chatRepositoryProvider).getTodayMessageCount(matchId);
-  return maxDaily - count;
+  return AppConstants.maxDailyMessages - count;
 });
 
 // ═══ Chat Notifier (send message + loading state) ═══
 
-final chatNotifierProvider = StateNotifierProvider.family<ChatNotifier,
+/// [A-05] FIX: AutoDisposeNotifier kullanılıyor, Ref anti-pattern düzeltildi
+final chatNotifierProvider = AutoDisposeNotifierProvider.family<ChatNotifier,
     ChatState, String>(
-  (ref, matchId) => ChatNotifier(
-    ref.watch(chatRepositoryProvider),
-    matchId,
-    ref,
-  ),
+  ChatNotifier.new,
 );
 
 class ChatState {
@@ -44,30 +44,28 @@ class ChatState {
   const ChatState({this.isLoading = false, this.error});
 }
 
-class ChatNotifier extends StateNotifier<ChatState> {
-  final ChatRepository _repository;
-  final String _matchId;
-  final Ref _ref;
-
-  ChatNotifier(this._repository, this._matchId, this._ref)
-      : super(const ChatState());
+class ChatNotifier extends AutoDisposeFamilyNotifier<ChatState, String> {
+  @override
+  ChatState build(String matchId) => const ChatState();
 
   Future<void> sendMessage(String message) async {
     state = const ChatState(isLoading: true);
 
     try {
-      // Mevcut geçmişi al
+      final repo = ref.read(chatRepositoryProvider);
       final messages =
-          _ref.read(chatMessagesProvider(_matchId)).valueOrNull ?? [];
+          ref.read(chatMessagesProvider(arg)).valueOrNull ?? [];
 
-      await _repository.sendMessage(
-        matchId: _matchId,
+      await repo.sendMessage(
+        matchId: arg,
         message: message,
         history: messages,
       );
 
+      AnalyticsService.logChatMessageSent(arg);
+
       // Kalan hakkı yenile
-      _ref.invalidate(chatRemainingProvider(_matchId));
+      ref.invalidate(chatRemainingProvider(arg));
 
       state = const ChatState();
     } catch (e) {

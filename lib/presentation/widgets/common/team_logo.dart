@@ -26,6 +26,9 @@ class TeamLogo extends StatelessWidget {
       imageUrl: logoUrl,
       width: size,
       height: size,
+      maxHeightDiskCache: 200,
+      maxWidthDiskCache: 200,
+      cacheKey: 'team_${teamName.replaceAll(' ', '_').toLowerCase()}',
       placeholder: (context, url) => _buildFallback(theme),
       errorWidget: (context, url, error) => _buildFallback(theme),
     );

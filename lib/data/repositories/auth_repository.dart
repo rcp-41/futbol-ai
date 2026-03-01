@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../config/constants/firestore_paths.dart';
+import '../../core/utils/app_logger.dart';
 import '../models/user_model.dart';
 
 /// Auth repository — Anonim + Google Sign-In
@@ -24,8 +25,8 @@ class AuthRepository {
     final credential = await _auth.signInAnonymously();
     try {
       await _createOrUpdateUserProfile(credential.user!);
-    } catch (_) {
-      // Profil yazımı başarısız olsa bile giriş devam etsin
+    } catch (e) {
+      AppLogger.warn('Auth', 'Profil yazimi basarisiz (anonymous): $e');
     }
     return credential;
   }
@@ -41,10 +42,32 @@ class AuthRepository {
     );
     try {
       await _createOrUpdateUserProfile(credential.user!);
-    } catch (_) {
-      // Profil yazımı başarısız olsa bile giriş devam etsin
+    } catch (e) {
+      AppLogger.warn('Auth', 'Profil yazimi basarisiz (email): $e');
     }
     return credential;
+  }
+
+  /// [E-04] Email/Password ile kayıt
+  Future<UserCredential> registerWithEmail({
+    required String email,
+    required String password,
+  }) async {
+    final credential = await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    try {
+      await _createOrUpdateUserProfile(credential.user!);
+    } catch (e) {
+      AppLogger.warn('Auth', 'Profil yazimi basarisiz (register): $e');
+    }
+    return credential;
+  }
+
+  /// [E-05] Şifre sıfırlama
+  Future<void> sendPasswordResetEmail(String email) async {
+    await _auth.sendPasswordResetEmail(email: email);
   }
 
   /// Çıkış

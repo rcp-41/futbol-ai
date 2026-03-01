@@ -28,7 +28,11 @@ class MatchModel with _$MatchModel {
       _$MatchModelFromJson(json);
 
   factory MatchModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+    final rawData = doc.data();
+    if (rawData == null) {
+      throw Exception('Document data is null: ${doc.id}');
+    }
+    final data = rawData as Map<String, dynamic>;
     // Timestamp → DateTime conversion
     if (data['matchDate'] is Timestamp) {
       data['matchDate'] =

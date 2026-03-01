@@ -1,10 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../core/utils/app_logger.dart';
 
+import '../../config/constants/firestore_paths.dart';
 import '../datasources/gemini_datasource.dart';
 import '../models/chat_message_model.dart';
 
-/// Chat Repository — mesaj gonder, Firestore'a kaydet, gecmis yukle, temizle
+/// Chat Repository — Cloud Function üzerinden mesaj gönder, Firestore'dan geçmiş yükle
 class ChatRepository {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -21,15 +23,17 @@ class ChatRepository {
   String? get _userId => _auth.currentUser?.uid;
 
   CollectionReference<Map<String, dynamic>> _messagesRef(String matchId) {
+    final userId = _userId;
+    if (userId == null) throw Exception('Oturum açılmamış.');
     return _firestore
-        .collection('chats')
-        .doc(_userId)
-        .collection('matchChats')
+        .collection(FirestorePaths.chats)
+        .doc(userId)
+        .collection(FirestorePaths.matchChatsSubcollection)
         .doc(matchId)
-        .collection('messages');
+        .collection(FirestorePaths.messagesSubcollection);
   }
 
-  /// Mesaj gecmisini stream et
+  /// Mesaj geçmişini stream et
   Stream<List<ChatMessageModel>> streamMessages(String matchId) {
     if (_userId == null) return Stream.value([]);
 
@@ -48,78 +52,52 @@ class ChatRepository {
             }).toList());
   }
 
-  /// AI'a mesaj gonder ve yanit al — her iki mesaji da Firestore'a kaydet
+  /// AI'a mesaj gönder — Cloud Function üzerinden
+  /// Cloud Function hem mesajı hem yanıtı Firestore'a kaydeder.
+  /// Client tarafında ek yazma yapılmaz (duplikasyon önlenir).
   Future<String> sendMessage({
     required String matchId,
     required String message,
     List<ChatMessageModel>? history,
   }) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Oturum acilmamis.');
+    if (_userId == null) throw Exception('Oturum açılmamış.');
 
-    // 1. Kullanici mesajini Firestore'a kaydet
-    await _messagesRef(matchId).add({
-      'role': 'user',
-      'content': message,
-      'timestamp': FieldValue.serverTimestamp(),
-      'tokenCount': message.length ~/ 4, // yaklasik token tahmini
-    });
-
-    // 2. Mac verisini al (chat baglami icin)
-    Map<String, dynamic>? matchData;
-    try {
-      final matchDoc =
-          await _firestore.collection('matches').doc(matchId).get();
-      if (matchDoc.exists) {
-        matchData = matchDoc.data();
-      } else {
-        final sportotoDoc =
-            await _firestore.collection('sportoto_matches').doc(matchId).get();
-        if (sportotoDoc.exists) matchData = sportotoDoc.data();
-      }
-    } catch (_) {
-      // Mac verisi alinamazsa devam et
-    }
-
-    // 3. History'yi Gemini formatina donustur
+    // History'yi Cloud Function formatına dönüştür
     final historyMaps = history
         ?.map((m) => {'role': m.role, 'content': m.content})
         .toList();
 
-    // 4. Gemini'den yanit al
+    // Cloud Function üzerinden mesaj gönder
+    // Server hem user mesajını hem AI yanıtını Firestore'a yazar
     final response = await _datasource.sendChatMessage(
       matchId: matchId,
       message: message,
       history: historyMaps,
-      matchData: matchData,
     );
-
-    // 5. AI yanitini Firestore'a kaydet
-    await _messagesRef(matchId).add({
-      'role': 'assistant',
-      'content': response,
-      'timestamp': FieldValue.serverTimestamp(),
-      'tokenCount': response.length ~/ 4,
-    });
 
     return response;
   }
 
-  /// Bugun gonderilen mesaj sayisini getir
+  /// [B-11] FIX: Bugün gönderilen mesaj sayısını global olarak getir
+  /// rateLimits koleksiyonundan okur (Cloud Function ile senkron)
   Future<int> getTodayMessageCount(String matchId) async {
     if (_userId == null) return 0;
 
-    final today = DateTime.now();
-    final startOfDay = DateTime(today.year, today.month, today.day);
+    final today = DateTime.now().toUtc().toIso8601String().split('T')[0];
+    final docId = '${_userId}_$today';
 
-    final snap = await _messagesRef(matchId)
-        .where('role', isEqualTo: 'user')
-        .where('timestamp',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-        .count()
-        .get();
+    try {
+      final doc = await _firestore
+          .collection(FirestorePaths.rateLimits)
+          .doc(docId)
+          .get();
 
-    return snap.count ?? 0;
+      if (!doc.exists) return 0;
+      return (doc.data()?['count'] as num?)?.toInt() ?? 0;
+    } catch (e) {
+      AppLogger.error('Chat', 'Message count hatası', e);
+      return 0;
+    }
   }
 
   /// Sohbeti temizle
@@ -127,10 +105,24 @@ class ChatRepository {
     if (_userId == null) return;
 
     final snap = await _messagesRef(matchId).get();
-    final batch = _firestore.batch();
+    if (snap.docs.isEmpty) return;
+
+    // Batch limitine dikkat
+    const batchLimit = 400;
+    var batch = _firestore.batch();
+    var count = 0;
+
     for (final doc in snap.docs) {
       batch.delete(doc.reference);
+      count++;
+      if (count >= batchLimit) {
+        await batch.commit();
+        batch = _firestore.batch();
+        count = 0;
+      }
     }
-    await batch.commit();
+    if (count > 0) {
+      await batch.commit();
+    }
   }
 }

@@ -2,17 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Tema state yönetimi — dark/light/system
-final themeProvider = StateNotifierProvider<ThemeNotifier, ThemeMode>(
-  (ref) => ThemeNotifier(),
+import '../../core/services/analytics_service.dart';
+
+/// [A-08] FIX: SharedPreferences async olarak yükleniyor,
+/// ThemeNotifier build() ile güvenli başlatılıyor.
+final themeProvider = NotifierProvider<ThemeNotifier, ThemeMode>(
+  ThemeNotifier.new,
 );
 
-class ThemeNotifier extends StateNotifier<ThemeMode> {
-  ThemeNotifier() : super(ThemeMode.dark) {
-    _loadTheme();
-  }
-
+class ThemeNotifier extends Notifier<ThemeMode> {
   static const String _key = 'theme_mode';
+
+  @override
+  ThemeMode build() {
+    // Async olarak tema yükle, gelene kadar dark varsayılan
+    _loadTheme();
+    return ThemeMode.dark;
+  }
 
   Future<void> _loadTheme() async {
     final prefs = await SharedPreferences.getInstance();
@@ -24,6 +30,7 @@ class ThemeNotifier extends StateNotifier<ThemeMode> {
     state = mode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, _toString(mode));
+    AnalyticsService.logThemeChanged(_toString(mode));
   }
 
   Future<void> toggle() async {

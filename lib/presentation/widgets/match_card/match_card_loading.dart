@@ -18,9 +18,7 @@ class MatchCardLoading extends StatefulWidget {
 class _MatchCardLoadingState extends State<MatchCardLoading>
     with SingleTickerProviderStateMixin {
   int _messageIndex = 0;
-  double _progress = 0;
   Timer? _messageTimer;
-  Timer? _progressTimer;
 
   @override
   void initState() {
@@ -34,20 +32,11 @@ class _MatchCardLoadingState extends State<MatchCardLoading>
         });
       }
     });
-    // Progress — 60 saniyede tamamlanır
-    _progressTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (mounted) {
-        setState(() {
-          _progress = (_progress + 0.5 / 60).clamp(0.0, 0.95);
-        });
-      }
-    });
   }
 
   @override
   void dispose() {
     _messageTimer?.cancel();
-    _progressTimer?.cancel();
     super.dispose();
   }
 
@@ -112,11 +101,10 @@ class _MatchCardLoadingState extends State<MatchCardLoading>
             ),
             const SizedBox(height: 20),
 
-            // Progress bar
+            // Progress bar — indeterminate (gerçek ilerleme belli değil)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: LinearProgressIndicator(
-                value: _progress,
                 minHeight: 6,
                 backgroundColor:
                     theme.colorScheme.onSurface.withValues(alpha: 0.1),

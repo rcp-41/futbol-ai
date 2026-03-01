@@ -1,32 +1,73 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Geçici: Anonim auth aktif edilene kadar okuma izni açık
-    match /matches/{matchId} {
-      allow read: if true;
-      allow write: if request.auth != null && request.auth.token.admin == true;
-    }
-    match /sportoto_matches/{matchId} {
-      allow read: if true;
-      allow write: if false;  // Cloud Function only
-    }
-    match /analyses/{analysisId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    match /chats/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
+
+    // Users — sadece kendi verisine erişebilir
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
-    match /rateLimits/{document=**} {
+
+    // Matches — authenticated kullanıcılar okuyabilir, yazma sadece admin
+    match /matches/{matchId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Sportoto matches — authenticated okuma, yazma sadece Cloud Function
+    match /sportoto_matches/{matchId} {
       allow read: if request.auth != null;
       allow write: if false;
     }
+
+    // Analyses — kullanıcı kendi analizlerine erişebilir
+    match /analyses/{analysisId} {
+      allow read: if request.auth != null &&
+        resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null &&
+        resource.data.userId == request.auth.uid;
+    }
+
+    // Multi-Analyses — kullanıcı kendi çoklu analizlerine erişebilir
+    match /multi_analyses/{analysisId} {
+      // Allow read if the doc was created by this user (userId field matches)
+      // OR if the document ID ends with their UID
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        analysisId.matches('.*_' + request.auth.uid + '$')
+      );
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        analysisId.matches('.*_' + request.auth.uid + '$')
+      );
+      allow delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        analysisId.matches('.*_' + request.auth.uid + '$')
+      );
+    }
+
+    // Chat messages — kullanıcı kendi sohbetlerine erişebilir
+    match /chats/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Rate limits — sadece Cloud Functions erişebilir (server-side)
+    match /rateLimits/{document=**} {
+      allow read, write: if false;
+    }
+
+    // App config — herkes okuyabilir, sadece admin yazabilir
     match /appConfig/{document=**} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Scrape history — sadece admin
+    match /scrapeHistory/{document=**} {
+      allow read, write: if false;
     }
   }
 }

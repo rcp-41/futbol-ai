@@ -1,10 +1,13 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/services/analytics_service.dart';
+import '../../core/utils/error_mapper.dart';
 import '../providers/matches_provider.dart';
 
-/// Login Screen — Email/Password ile giriş
+/// Login Screen — Email/Password ile giriş + kayıt + şifre sıfırlama
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -18,6 +21,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _isLoading = false;
   String? _error;
   bool _obscurePassword = true;
+  bool _isRegisterMode = false;
 
   @override
   void dispose() {
@@ -43,11 +47,86 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-
+      AnalyticsService.logLogin('email');
       if (mounted) context.go('/home');
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _error = mapFirebaseAuthError(e.code);
+        _isLoading = false;
+      });
     } catch (e) {
       setState(() {
-        _error = _mapAuthError(e.toString());
+        _error = 'Giriş başarısız. Tekrar deneyin.';
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// [E-04] Kayıt ol
+  Future<void> _register() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      setState(() => _error = 'Email ve şifre gerekli.');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final auth = ref.read(authRepositoryProvider);
+      await auth.registerWithEmail(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+      AnalyticsService.logSignUp('email');
+      if (mounted) context.go('/home');
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _error = mapFirebaseAuthError(e.code);
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Kayıt başarısız. Tekrar deneyin.';
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// [E-05] Şifre sıfırlama
+  Future<void> _resetPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      setState(() => _error = 'Lütfen e-posta adresinizi girin.');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final auth = ref.read(authRepositoryProvider);
+      await auth.sendPasswordResetEmail(email);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Şifre sıfırlama e-postası gönderildi.'),
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _error = mapFirebaseAuthError(e.code);
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'İşlem başarısız. Tekrar deneyin.';
         _isLoading = false;
       });
     }
@@ -62,23 +141,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       final auth = ref.read(authRepositoryProvider);
       await auth.signInAnonymously();
+      AnalyticsService.logLogin('anonymous');
       if (mounted) context.go('/home');
     } catch (e) {
       setState(() {
-        _error = 'Anonim giriş başarısız: ${e.toString()}';
+        _error = 'Anonim giriş başarısız. Tekrar deneyin.';
         _isLoading = false;
       });
     }
-  }
-
-  String _mapAuthError(String error) {
-    if (error.contains('user-not-found')) return 'Kullanıcı bulunamadı.';
-    if (error.contains('wrong-password')) return 'Şifre yanlış.';
-    if (error.contains('invalid-email')) return 'Geçersiz email adresi.';
-    if (error.contains('user-disabled')) return 'Hesap devre dışı.';
-    if (error.contains('invalid-credential')) return 'Email veya şifre yanlış.';
-    if (error.contains('too-many-requests')) return 'Çok fazla deneme. Lütfen bekleyin.';
-    return 'Giriş başarısız. Tekrar deneyin.';
   }
 
   @override
@@ -136,7 +206,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   controller: _passwordController,
                   obscureText: _obscurePassword,
                   textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _signIn(),
+                  onSubmitted: (_) =>
+                      _isRegisterMode ? _register() : _signIn(),
                   decoration: InputDecoration(
                     labelText: 'Şifre',
                     prefixIcon: const Icon(Icons.lock_outlined),
@@ -156,6 +227,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
                 const SizedBox(height: 8),
 
+                // [E-05] Şifremi Unuttum
+                if (!_isRegisterMode)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _isLoading ? null : _resetPassword,
+                      child: Text(
+                        'Şifremi Unuttum',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+
                 // Error
                 if (_error != null)
                   Padding(
@@ -171,12 +257,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 const SizedBox(height: 16),
 
-                // Login Button
+                // Login / Register Button
                 SizedBox(
                   width: double.infinity,
                   height: 52,
                   child: FilledButton(
-                    onPressed: _isLoading ? null : _signIn,
+                    onPressed: _isLoading
+                        ? null
+                        : (_isRegisterMode ? _register : _signIn),
                     style: FilledButton.styleFrom(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -191,13 +279,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               color: Colors.white,
                             ),
                           )
-                        : const Text(
-                            'Giriş Yap',
-                            style: TextStyle(
+                        : Text(
+                            _isRegisterMode ? 'Kayıt Ol' : 'Giriş Yap',
+                            style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // [E-04] Toggle Register / Login
+                TextButton(
+                  onPressed: _isLoading
+                      ? null
+                      : () => setState(() {
+                            _isRegisterMode = !_isRegisterMode;
+                            _error = null;
+                          }),
+                  child: Text(
+                    _isRegisterMode
+                        ? 'Zaten hesabınız var mı? Giriş Yap'
+                        : 'Hesabınız yok mu? Kayıt Ol',
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -211,7 +315,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       child: Text(
                         'veya',
                         style: TextStyle(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.5),
                         ),
                       ),
                     ),

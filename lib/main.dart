@@ -5,10 +5,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shorebird_code_push/shorebird_code_push.dart';
 
 import 'app.dart';
+import 'core/utils/app_logger.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -32,6 +34,10 @@ Future<void> main() async {
     // Turkce tarih formati destegi
     await initializeDateFormatting('tr_TR');
 
+    // [P-11] GoogleFonts — ilk indirmeden sonra disk cache kullanır.
+    // Offline durumda sistem fontu ile fallback yapması için:
+    GoogleFonts.config.allowRuntimeFetching = true;
+
     // Arka planda OTA guncelleme kontrolu (kullaniciyi bekletmez)
     _checkForOTAUpdates();
 
@@ -51,9 +57,9 @@ Future<void> _checkForOTAUpdates() async {
     final status = await updater.checkForUpdate();
     if (status == UpdateStatus.outdated) {
       await updater.update();
-      debugPrint('[Shorebird] Patch indirildi, sonraki acilista aktif.');
+      AppLogger.debug('Shorebird', 'Patch indirildi, sonraki acilista aktif.');
     }
   } catch (e) {
-    debugPrint('[Shorebird] Guncelleme kontrolu basarisiz: $e');
+    AppLogger.error('Shorebird', 'Guncelleme kontrolu basarisiz', e);
   }
 }

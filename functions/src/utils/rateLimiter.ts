@@ -7,69 +7,59 @@ const LIMITS: Record<string, number> = {
 const GLOBAL_DAILY_LIMIT = 1000;
 
 /**
- * checkRateLimit — Kullanıcı ve global rate limit kontrolü
+ * checkAndIncrementRateLimit — Atomik transaction ile rate limit kontrolü ve artırma
+ * Race condition önlenir: check + increment tek transaction içinde yapılır.
  */
-export async function checkRateLimit(
+export async function checkAndIncrementRateLimit(
     db: admin.firestore.Firestore,
     userId: string,
     tier: string
 ): Promise<boolean> {
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-
-    // User rate limit
-    const userLimitRef = db.collection('rateLimits').doc(`${userId}_${today}`);
-    const userLimitDoc = await userLimitRef.get();
-    const userCount = userLimitDoc.exists ? (userLimitDoc.data()?.count || 0) : 0;
     const limit = LIMITS[tier] || LIMITS['free'];
 
-    if (userCount >= limit) {
-        return false;
-    }
+    // User rate limit — atomik transaction
+    const userRef = db.collection('rateLimits').doc(`${userId}_${today}`);
+    const userAllowed = await db.runTransaction(async (tx) => {
+        const doc = await tx.get(userRef);
+        const count = doc.exists ? (doc.data()?.count || 0) : 0;
+        if (count >= limit) return false;
+        tx.set(userRef, {
+            count: count + 1,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        return true;
+    });
 
-    // Global rate limit
+    if (!userAllowed) return false;
+
+    // Global rate limit — atomik transaction
     const globalRef = db.collection('rateLimits').doc(`global_${today}`);
-    const globalDoc = await globalRef.get();
-    const globalCount = globalDoc.exists ? (globalDoc.data()?.count || 0) : 0;
+    const globalAllowed = await db.runTransaction(async (tx) => {
+        const doc = await tx.get(globalRef);
+        const count = doc.exists ? (doc.data()?.count || 0) : 0;
+        if (count >= GLOBAL_DAILY_LIMIT) return false;
+        tx.set(globalRef, {
+            count: count + 1,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        return true;
+    });
 
-    if (globalCount >= GLOBAL_DAILY_LIMIT) {
+    if (!globalAllowed) {
+        // Global limit aşıldı ama user counter artmıştı, geri al
+        await db.runTransaction(async (tx) => {
+            const doc = await tx.get(userRef);
+            const count = doc.exists ? (doc.data()?.count || 0) : 0;
+            if (count > 0) {
+                tx.set(userRef, {
+                    count: count - 1,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+            }
+        });
         return false;
     }
 
     return true;
-}
-
-/**
- * incrementRateLimit — Kullanıcı ve global sayacı artır
- */
-export async function incrementRateLimit(
-    db: admin.firestore.Firestore,
-    userId: string
-): Promise<void> {
-    const today = new Date().toISOString().split('T')[0];
-
-    const batch = db.batch();
-
-    // User counter
-    const userRef = db.collection('rateLimits').doc(`${userId}_${today}`);
-    batch.set(
-        userRef,
-        {
-            count: admin.firestore.FieldValue.increment(1),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-    );
-
-    // Global counter
-    const globalRef = db.collection('rateLimits').doc(`global_${today}`);
-    batch.set(
-        globalRef,
-        {
-            count: admin.firestore.FieldValue.increment(1),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-    );
-
-    await batch.commit();
 }

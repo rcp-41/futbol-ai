@@ -94,75 +94,78 @@ class SportotoScreen extends ConsumerWidget {
           return RefreshIndicator(
             onRefresh: () =>
                 ref.read(sportotoRefreshProvider.notifier).refresh(),
-            child: ListView(
+            child: ListView.builder(
               padding: const EdgeInsets.all(16),
-              children: [
-                // Hafta bilgisi
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        theme.colorScheme.primary.withValues(alpha: 0.15),
-                        theme.colorScheme.secondary.withValues(alpha: 0.08),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      const Text('🏆', style: TextStyle(fontSize: 24)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Spor Toto — $weekNumber. Hafta',
-                              style:
-                                  theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Text(
-                              '${matches.length} maç',
-                              style:
-                                  theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurface
-                                    .withValues(alpha: 0.6),
-                              ),
-                            ),
+              itemCount: matches.length + 1, // +1 header için
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  // Hafta bilgisi header
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            theme.colorScheme.primary.withValues(alpha: 0.15),
+                            theme.colorScheme.secondary.withValues(alpha: 0.08),
                           ],
                         ),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      Chip(
-                        label: Text(
-                          '${matches.length}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
+                      child: Row(
+                        children: [
+                          const Text('🏆', style: TextStyle(fontSize: 24)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Spor Toto — $weekNumber. Hafta',
+                                  style:
+                                      theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  '${matches.length} maç',
+                                  style:
+                                      theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurface
+                                        .withValues(alpha: 0.6),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        backgroundColor: theme.colorScheme.primary
-                            .withValues(alpha: 0.1),
+                          Chip(
+                            label: Text(
+                              '${matches.length}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            backgroundColor: theme.colorScheme.primary
+                                .withValues(alpha: 0.1),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
+                    ),
+                  );
+                }
 
-                // Maç kartları
-                ...matches.map(
-                  (match) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: MatchCard(match: match),
-                  ),
-                ),
-              ],
+                // Maç kartları — lazy rendering
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: MatchCard(match: matches[index - 1]),
+                );
+              },
             ),
           );
         },
-        loading: () => _buildShimmerList(),
+        loading: () => _buildShimmerList(context),
         error: (error, _) => AppErrorWidget(
           message: 'Sportoto listesi yüklenemedi',
           onRetry: () => ref.invalidate(sportotoMatchesProvider),
@@ -171,10 +174,11 @@ class SportotoScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildShimmerList() {
+  Widget _buildShimmerList(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Shimmer.fromColors(
-      baseColor: Colors.grey.shade800,
-      highlightColor: Colors.grey.shade600,
+      baseColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+      highlightColor: isDark ? Colors.grey.shade600 : Colors.grey.shade100,
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: 5,

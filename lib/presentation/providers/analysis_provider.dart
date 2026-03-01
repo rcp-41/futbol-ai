@@ -1,15 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/datasources/gemini_datasource.dart';
 import '../../data/models/analysis_model.dart';
 import '../../data/repositories/analysis_repository.dart';
-import 'matches_provider.dart';
+import 'core_providers.dart';
 
-// ═══ Datasource & Repository Providers ═══
-
-final geminiDatasourceProvider = Provider<GeminiDatasource>(
-  (ref) => GeminiDatasource(),
-);
+// ═══ Repository Provider ═══
 
 final analysisRepositoryProvider = Provider<AnalysisRepository>(
   (ref) => AnalysisRepository(datasource: ref.watch(geminiDatasourceProvider)),
@@ -17,9 +12,9 @@ final analysisRepositoryProvider = Provider<AnalysisRepository>(
 
 // ═══ Analysis Provider ═══
 
-/// Maç bazlı analiz — FutureProvider.family
+/// Maç bazlı analiz — [P-05] autoDispose eklenmiş, hafta değiştiğinde bellekten temizlenir.
 final analysisProvider =
-    FutureProvider.family<AnalysisModel, String>((ref, matchId) async {
+    FutureProvider.autoDispose.family<AnalysisModel, String>((ref, matchId) async {
   final auth = ref.watch(authStateProvider).value;
   final userId = auth?.uid ?? 'anonymous';
 
@@ -32,7 +27,7 @@ final analysisProvider =
 // ═══ Analysis Status Stream ═══
 
 final analysisStatusProvider =
-    StreamProvider.family<String, String>((ref, matchId) {
+    StreamProvider.autoDispose.family<String, String>((ref, matchId) {
   final auth = ref.watch(authStateProvider).value;
   final userId = auth?.uid ?? 'anonymous';
 

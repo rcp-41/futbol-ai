@@ -1,18 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import '../utils/app_logger.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+/// [S-09] FIX: Owner/repo bilgileri merkezi config'e taşındı.
+/// İleride Firebase Remote Config'den okunabilir.
+class _UpdateConfig {
+  static const owner = 'rcp-41';
+  static const repo = 'futbol-ai';
+}
+
 /// GitHub Releases tabanlı güncelleme servisi
 class UpdateService {
-  static const _owner = 'rcp-41';
-  static const _repo = 'futbol-ai';
   static const _apiUrl =
-      'https://api.github.com/repos/$_owner/$_repo/releases/latest';
+      'https://api.github.com/repos/${_UpdateConfig.owner}/${_UpdateConfig.repo}/releases/latest';
 
   String? _latestVersion;
   String? _downloadUrl;
@@ -40,7 +45,7 @@ class UpdateService {
       );
 
       if (response.statusCode != 200) {
-        debugPrint('[Update] GitHub API error: ${response.statusCode}');
+        AppLogger.warn('Update', 'GitHub API error: ${response.statusCode}');
         return UpdateCheckResult.error;
       }
 
@@ -67,7 +72,7 @@ class UpdateService {
 
       return UpdateCheckResult.upToDate;
     } catch (e) {
-      debugPrint('[Update] Kontrol hatası: $e');
+      AppLogger.error('Update', 'Kontrol hatası', e);
       return UpdateCheckResult.error;
     }
   }
@@ -104,26 +109,33 @@ class UpdateService {
 
       await sink.close();
 
-      debugPrint('[Update] İndirildi: $filePath (${receivedBytes ~/ 1024} KB)');
+      AppLogger.debug('Update', 'İndirildi: $filePath (${receivedBytes ~/ 1024} KB)');
       return filePath;
     } catch (e) {
-      debugPrint('[Update] İndirme hatası: $e');
+      AppLogger.error('Update', 'İndirme hatası', e);
       return null;
     }
   }
 
   /// Versiyon karşılaştırma: a < b → -1, a == b → 0, a > b → 1
   int _compareVersions(String a, String b) {
-    final aParts = a.split('.').map(int.parse).toList();
-    final bParts = b.split('.').map(int.parse).toList();
+    try {
+      // Pre-release suffix'lerini temizle (ör: "1.0.0-beta" → "1.0.0")
+      final cleanA = a.split('-').first;
+      final cleanB = b.split('-').first;
+      final aParts = cleanA.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+      final bParts = cleanB.split('.').map((s) => int.tryParse(s) ?? 0).toList();
 
-    for (int i = 0; i < 3; i++) {
-      final aPart = i < aParts.length ? aParts[i] : 0;
-      final bPart = i < bParts.length ? bParts[i] : 0;
-      if (aPart < bPart) return -1;
-      if (aPart > bPart) return 1;
+      for (int i = 0; i < 3; i++) {
+        final aPart = i < aParts.length ? aParts[i] : 0;
+        final bPart = i < bParts.length ? bParts[i] : 0;
+        if (aPart < bPart) return -1;
+        if (aPart > bPart) return 1;
+      }
+      return 0;
+    } catch (_) {
+      return 0;
     }
-    return 0;
   }
 }
 

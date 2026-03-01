@@ -1,17 +1,154 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
-import * as admin from 'firebase-admin';
+import { logger } from 'firebase-functions';
+import { db, admin } from './firebase';
 import { buildAnalysisPrompt } from './prompts/analysisPrompt';
-import { checkRateLimit, incrementRateLimit } from './utils/rateLimiter';
+import { checkAndIncrementRateLimit } from './utils/rateLimiter';
 import { parseAnalysisResponse } from './utils/responseParser';
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
-if (!admin.apps.length) {
-    admin.initializeApp();
+/**
+ * Team name normalizer — converts Turkish team names to slug format
+ * used by the scraper (e.g. "Galatasaray" → "galatasaray")
+ */
+function normalizeTeamName(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ü/g, 'u')
+        .replace(/ö/g, 'o').replace(/ç/g, 'c').replace(/ı/g, 'i')
+        .replace(/İ/g, 'i').replace(/Ş/g, 's').replace(/Ğ/g, 'g')
+        .replace(/Ü/g, 'u').replace(/Ö/g, 'o').replace(/Ç/g, 'c')
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .trim();
 }
 
-const db = admin.firestore();
+/**
+ * Look up enrichment data from the scraper's `matches` collection.
+ * The scraper uses document keys like "2026-02-07_galatasaray_vs_genclerbirligi"
+ * so we construct candidate keys and try direct lookups.
+ */
+async function findScraperEnrichmentData(
+    matchData: Record<string, any>
+): Promise<Record<string, any> | null> {
+    const homeName = matchData.homeTeam?.name || '';
+    const awayName = matchData.awayTeam?.name || '';
+
+    if (!homeName || !awayName) return null;
+
+    // Get match date string (YYYY-MM-DD)
+    let dateStr = '';
+    if (matchData.matchDate?.toDate) {
+        const d = matchData.matchDate.toDate();
+        dateStr = d.toISOString().split('T')[0];
+    } else if (typeof matchData.matchDate === 'string') {
+        dateStr = matchData.matchDate.split('T')[0];
+    }
+
+    if (!dateStr) return null;
+
+    const homeSlug = normalizeTeamName(homeName);
+    const awaySlug = normalizeTeamName(awayName);
+
+    // Try exact key match (scraper format: YYYY-MM-DD_home-slug_vs_away-slug)
+    const candidateKeys = [
+        `${dateStr}_${homeSlug}_vs_${awaySlug}`,
+        `${dateStr}_${awaySlug}_vs_${homeSlug}`,  // reversed in case scraper has it flipped
+    ];
+
+    // Also try ±1 day (date timezone differences)
+    const baseDate = new Date(dateStr);
+    for (const offset of [-1, 1]) {
+        const altDate = new Date(baseDate);
+        altDate.setDate(altDate.getDate() + offset);
+        const altDateStr = altDate.toISOString().split('T')[0];
+        candidateKeys.push(`${altDateStr}_${homeSlug}_vs_${awaySlug}`);
+        candidateKeys.push(`${altDateStr}_${awaySlug}_vs_${homeSlug}`);
+    }
+
+    for (const key of candidateKeys) {
+        try {
+            const doc = await db.collection('matches').doc(key).get();
+            if (doc.exists) {
+                logger.info(`✅ Scraper enrichment data found: ${key}`);
+                return doc.data()!;
+            }
+        } catch (err) {
+            logger.warn(`Scraper lookup error for key ${key}: ${err}`);
+        }
+    }
+
+    logger.info(`ℹ️ No scraper enrichment data found for ${homeName} vs ${awayName} (${dateStr})`);
+    return null;
+}
+
+/**
+ * Merge scraper enrichment data into sportoto match data.
+ * Only adds fields that don't already exist in the match data.
+ */
+function mergeEnrichmentData(
+    matchData: Record<string, any>,
+    enrichment: Record<string, any>
+): Record<string, any> {
+    const merged = { ...matchData };
+
+    // Copy fbref data
+    if (enrichment.fbref && !merged.fbref) {
+        merged.fbref = enrichment.fbref;
+    }
+    // Copy sofascore data
+    if (enrichment.sofascore && !merged.sofascore) {
+        merged.sofascore = enrichment.sofascore;
+    }
+    // Copy understat data
+    if (enrichment.understat && !merged.understat) {
+        merged.understat = enrichment.understat;
+    }
+    // Copy weather data
+    if (enrichment.weather && !merged.weather) {
+        merged.weather = enrichment.weather;
+    }
+    // Copy sources list
+    if (enrichment.sources?.length && !merged.sources?.length) {
+        merged.sources = enrichment.sources;
+    }
+    // Copy data completeness
+    if (enrichment.dataCompleteness && !merged.dataCompleteness) {
+        merged.dataCompleteness = enrichment.dataCompleteness;
+    }
+    // Copy odds from sofascore if not already present
+    if (!merged.odds && enrichment.sofascore?.odds) {
+        merged.odds = enrichment.sofascore.odds;
+    }
+    // Copy stadium from meta
+    if (!merged.stadium && enrichment.meta?.stadium) {
+        merged.stadium = enrichment.meta.stadium;
+    }
+    // Copy form data from meta/result if available
+    if (!merged.homeTeam?.formLast5 && enrichment.meta) {
+        // enrich team data from scraper meta
+        if (enrichment.meta.homeTeam) {
+            merged.homeTeam = { ...merged.homeTeam, scraperName: enrichment.meta.homeTeam };
+        }
+        if (enrichment.meta.awayTeam) {
+            merged.awayTeam = { ...merged.awayTeam, scraperName: enrichment.meta.awayTeam };
+        }
+    }
+
+    return merged;
+}
+
+// Gemini API response structure
+interface GeminiResponse {
+    candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+    }>;
+}
+
+// Input validation regex
+const MATCH_ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 
 /**
  * analyzeMatch — Maç analizi Cloud Function
@@ -20,7 +157,7 @@ const db = admin.firestore();
 export const analyzeMatch = onCall(
     {
         secrets: [GEMINI_API_KEY],
-        timeoutSeconds: 120,
+        timeoutSeconds: 300,
         memory: '512MiB',
         region: 'europe-west1',
     },
@@ -33,14 +170,18 @@ export const analyzeMatch = onCall(
         const userId = request.auth.uid;
         const { matchId } = request.data;
 
-        if (!matchId) {
+        // Input validation
+        if (!matchId || typeof matchId !== 'string') {
             throw new HttpsError('invalid-argument', 'matchId gerekli.');
         }
+        if (!MATCH_ID_PATTERN.test(matchId)) {
+            throw new HttpsError('invalid-argument', 'Geçersiz matchId formatı.');
+        }
 
-        // Rate limit check
+        // Rate limit check (atomik transaction)
         const userDoc = await db.collection('users').doc(userId).get();
         const tier = userDoc.exists ? (userDoc.data()?.tier || 'free') : 'free';
-        const canProceed = await checkRateLimit(db, userId, tier);
+        const canProceed = await checkAndIncrementRateLimit(db, userId, tier);
         if (!canProceed) {
             throw new HttpsError(
                 'resource-exhausted',
@@ -63,12 +204,32 @@ export const analyzeMatch = onCall(
             }
         }
 
-        // Get match data
-        const matchDoc = await db.collection('matches').doc(matchId).get();
+        // Get match data — check both collections
+        let matchDoc = await db.collection('matches').doc(matchId).get();
+        if (!matchDoc.exists) {
+            matchDoc = await db.collection('sportoto_matches').doc(matchId).get();
+        }
         if (!matchDoc.exists) {
             throw new HttpsError('not-found', 'Maç bulunamadı.');
         }
         const matchData = matchDoc.data()!;
+
+        // ══════ SCRAPER DATA ENRICHMENT ══════
+        // If the match came from sportoto_matches (basic data only),
+        // try to find enrichment data from the scraper's `matches` collection
+        const hasScraperData = !!(matchData.fbref || matchData.sofascore || matchData.understat);
+        let enrichedMatchData = matchData;
+
+        if (!hasScraperData) {
+            logger.info(`Match ${matchId} has no scraper data, searching for enrichment...`);
+            const enrichment = await findScraperEnrichmentData(matchData);
+            if (enrichment) {
+                enrichedMatchData = mergeEnrichmentData(matchData, enrichment);
+                logger.info(`✅ Match enriched with scraper data (completeness: ${enrichment.dataCompleteness || 0}%)`);
+            } else {
+                logger.info(`ℹ️ No scraper enrichment found, proceeding with basic data only`);
+            }
+        }
 
         // Create pending analysis doc
         const analysisRef = db.collection('analyses').doc();
@@ -80,54 +241,59 @@ export const analyzeMatch = onCall(
         });
 
         try {
-            // Build prompt
-            const systemPrompt = buildAnalysisPrompt(matchData);
+            // Build prompt with enriched data
+            const systemPrompt = buildAnalysisPrompt(enrichedMatchData);
 
-            // Call Gemini API with search grounding
             const apiKey = GEMINI_API_KEY.value();
-            const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${apiKey}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: systemPrompt }] }],
-                        generationConfig: {
-                            temperature: 0.7,
-                            topP: 0.9,
-                            topK: 40,
-                            maxOutputTokens: 8192,
-                            responseMimeType: 'application/json',
-                        },
-                        tools: [
-                            {
-                                google_search_retrieval: {
-                                    dynamic_retrieval_config: {
-                                        mode: 'MODE_DYNAMIC',
-                                        dynamic_threshold: 0.7,
-                                    },
-                                },
-                            },
-                        ],
-                    }),
-                    signal: AbortSignal.timeout(60000),
-                }
-            );
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${apiKey}`;
+
+            // ══════ SINGLE STEP: Offline data only — no internet search ══════
+            // Scraper data (FBref, SofaScore, Understat) is already embedded in the prompt.
+            // No google_search grounding → pure offline analysis with responseMimeType: JSON.
+            const analysisPrompt = `${systemPrompt}
+
+KRİTİK TALİMAT: Yukarıdaki çevrimdışı veri setini kullanarak ANALİZİNİ SADECE belirtilen JSON formatında döndür. JSON dışında HİÇBİR metin yazma. Açıklama yazma, sadece JSON döndür.`;
+
+            const response = await fetch(geminiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: analysisPrompt }] }],
+                    generationConfig: {
+                        temperature: 0.7,
+                        topP: 0.9,
+                        topK: 40,
+                        maxOutputTokens: 16384,
+                        responseMimeType: 'application/json',
+                    },
+                }),
+                signal: AbortSignal.timeout(180000),  // 3 min for pro model
+            });
 
             if (!response.ok) {
                 const errorBody = await response.text();
-                console.error('Gemini API error:', response.status, errorBody);
+                logger.error(`Gemini API error: status=${response.status}`);
+                logger.error(`Gemini error body (truncated): ${errorBody.substring(0, 300)}`);
                 throw new Error(`Gemini API error: ${response.status}`);
             }
 
-            const result = await response.json() as Record<string, unknown>;
+            const result = await response.json() as GeminiResponse;
             const rawText =
-                ((result as any).candidates?.[0]?.content?.parts?.[0]?.text) || '';
+                result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const finishReason = (result as any).candidates?.[0]?.finishReason || 'UNKNOWN';
+            logger.info(`Gemini rawText length: ${rawText.length}, finishReason: ${finishReason}`);
 
             // Parse & validate
             const analysisData = parseAnalysisResponse(rawText);
 
             // Save to Firestore
+            // [FB-07] Dynamic cache TTL based on match proximity
+            const matchDate = matchData.matchDate?.toDate?.() || new Date(matchData.matchDate);
+            const hoursUntilMatch = (matchDate.getTime() - Date.now()) / (1000 * 60 * 60);
+            let cacheTTLHours = 24;
+            if (hoursUntilMatch <= 24) cacheTTLHours = 4;        // Today → 4h cache
+            else if (hoursUntilMatch <= 168) cacheTTLHours = 12;  // Within 7 days → 12h cache
+
             await analysisRef.update({
                 ...analysisData,
                 status: 'completed',
@@ -135,12 +301,9 @@ export const analyzeMatch = onCall(
                 modelUsed: 'gemini-3.1-pro-preview',
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                 expiresAt: admin.firestore.Timestamp.fromDate(
-                    new Date(Date.now() + 24 * 60 * 60 * 1000)
+                    new Date(Date.now() + cacheTTLHours * 60 * 60 * 1000)
                 ),
             });
-
-            // Increment rate limit
-            await incrementRateLimit(db, userId);
 
             return { analysisId: analysisRef.id, cached: false, ...analysisData };
         } catch (error: unknown) {

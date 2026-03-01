@@ -65,6 +65,13 @@ class _ChatBottomSheetState extends ConsumerState<ChatBottomSheet> {
     final messages = ref.watch(chatMessagesProvider(widget.matchId));
     final remaining = ref.watch(chatRemainingProvider(widget.matchId));
 
+    // [P-02] FIX: Sadece mesaj sayısı değiştiğinde scroll tetiklenir
+    ref.listen(chatMessagesProvider(widget.matchId), (prev, next) {
+      final prevLen = prev?.valueOrNull?.length ?? 0;
+      final nextLen = next.valueOrNull?.length ?? 0;
+      if (nextLen > prevLen) _scrollToBottom();
+    });
+
     return DraggableScrollableSheet(
       initialChildSize: 0.65,
       minChildSize: 0.4,
@@ -87,10 +94,6 @@ class _ChatBottomSheetState extends ConsumerState<ChatBottomSheet> {
                     if (msgs.isEmpty) {
                       return _buildEmptyState(theme);
                     }
-                    // Auto-scroll on new data
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _scrollToBottom();
-                    });
                     return ListView.builder(
                       controller: _scrollController,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

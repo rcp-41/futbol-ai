@@ -15,6 +15,36 @@ class AppErrorWidget extends StatelessWidget {
     super.key,
   });
 
+  /// [U-07] Named constructors for common error types
+  const AppErrorWidget.network({
+    VoidCallback? onRetry,
+    Key? key,
+  }) : this(
+          message: 'İnternet bağlantısı kurulamadı',
+          icon: Icons.wifi_off_rounded,
+          onRetry: onRetry,
+          key: key,
+        );
+
+  const AppErrorWidget.server({
+    VoidCallback? onRetry,
+    Key? key,
+  }) : this(
+          message: 'Sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin.',
+          icon: Icons.cloud_off_rounded,
+          onRetry: onRetry,
+          key: key,
+        );
+
+  const AppErrorWidget.notFound({
+    Key? key,
+  }) : this(
+          message: 'Aradığınız içerik bulunamadı.',
+          icon: Icons.search_off_rounded,
+          onRetry: null,
+          key: key,
+        );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
