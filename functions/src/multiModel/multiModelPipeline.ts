@@ -3,15 +3,24 @@ import { logger } from 'firebase-functions/v2';
 import { defineSecret } from 'firebase-functions/params';
 import { verifyData } from './dataVerification';
 import { runDeepAnalysis } from './deepAnalysis';
-import { buildInitialPrompt, buildConsensusPrompt } from './multiModelPrompts';
-import { callGemini, callClaude, callConsensus } from './aiClients';
+import {
+    buildCorrelationInterpretPrompt,
+    buildStatsTacticsPrompt,
+    buildRefereeChaosPrompt,
+    buildSynthesisPrompt,
+    buildArbiterPrompt,
+    extractMatchInfo,
+} from './multiModelPrompts';
+import { callGemini, callClaude, callGPT, callArbiter } from './aiClients';
 import { parseAIResult } from './multiModelParser';
 import { enrichMatchData, formatEnrichmentForPrompt } from './scraperEnrichment';
+import { runFullCombinatorialScan, formatCorrelationsForPrompt } from './correlationEngine';
 
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 const anthropicApiKey = defineSecret('ANTHROPIC_API_KEY');
+const openaiApiKey = defineSecret('OPENAI_API_KEY');
 
-// Deep analysis modül adları (Türkçe)
+// Deep analysis modül adları (Türkçe) — fallback durumunda kullanılır
 const MODULE_NAMES: Record<string, string> = {
     weather: 'Hava Durumu Analizi',
     missingPlayers: 'Eksik Oyuncu Analizi',
@@ -21,10 +30,6 @@ const MODULE_NAMES: Record<string, string> = {
     setPieces: 'Duran Top Analizi',
     referee: 'Hakem Etkisi Analizi',
     tactics: 'Taktik/Formasyon Analizi',
-    squadDepth: 'Kadro Derinliği Analizi',
-    scoutingComparison: 'Scouting Karşılaştırma',
-    transferImpact: 'Transfer Etkisi Analizi',
-    newsSentiment: 'Haber Duygu Analizi',
 };
 
 export const onMultiAnalysisCreated = onDocumentCreated({
@@ -32,7 +37,7 @@ export const onMultiAnalysisCreated = onDocumentCreated({
     region: 'europe-west1',
     timeoutSeconds: 540, // 9 minutes
     memory: '1GiB',
-    secrets: [geminiApiKey, anthropicApiKey],
+    secrets: [geminiApiKey, anthropicApiKey, openaiApiKey],
 }, async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -42,7 +47,9 @@ export const onMultiAnalysisCreated = onDocumentCreated({
     const matchData = data.matchData;
 
     try {
-        // --- STAGE 1: VERIFICATION (AI-powered) ---
+        // ══════════════════════════════════════════
+        // STAGE 1: VERIFICATION
+        // ══════════════════════════════════════════
         await docRef.update({ status: 'verifying', statusMessage: 'Maç verileri doğrulanıyor...', updatedAt: new Date() });
         const verification = await verifyData(matchData, geminiApiKey.value());
         await docRef.update({ verification, updatedAt: new Date() });
@@ -57,7 +64,9 @@ export const onMultiAnalysisCreated = onDocumentCreated({
             return;
         }
 
-        // --- STAGE 1.5: SCRAPER ENRICHMENT ---
+        // ══════════════════════════════════════════
+        // STAGE 1.5: SCRAPER ENRICHMENT
+        // ══════════════════════════════════════════
         await docRef.update({
             status: 'enriching',
             statusMessage: 'Scraper verileri çekiliyor (takım, oyuncu, TD, hakem)...',
@@ -67,7 +76,6 @@ export const onMultiAnalysisCreated = onDocumentCreated({
         const enrichment = await enrichMatchData(matchData);
         const enrichmentText = formatEnrichmentForPrompt(enrichment);
 
-        // Enrichment verisini matchData'ya ekle (deep analysis ve AI prompt'ları için)
         const enrichedMatchData = {
             ...matchData,
             _enrichment: enrichment,
@@ -89,129 +97,237 @@ export const onMultiAnalysisCreated = onDocumentCreated({
             updatedAt: new Date()
         });
 
-        // --- STAGE 2: AI-DRIVEN DEEP ANALYSIS (8+ modül) ---
-        const totalModules = 8; // base modules (can expand later)
+        // ══════════════════════════════════════════
+        // STAGE 2: KORELASYON MOTORU
+        // ══════════════════════════════════════════
         await docRef.update({
-            status: 'analyzing',
-            statusMessage: `Derin analiz modülleri çalışıyor (0/${totalModules})...`,
+            status: 'scanning',
+            statusMessage: 'Korelasyon motoru çalışıyor — tüm metrik çiftleri taranıyor...',
             updatedAt: new Date()
         });
 
-        const deepAnalysis = await runDeepAnalysis(
-            enrichedMatchData,
-            geminiApiKey.value(),
-            async (moduleName: string, index: number) => {
-                // Her modül başladığında progress güncelle
-                const turkishName = MODULE_NAMES[moduleName] || moduleName;
-                await docRef.update({
-                    statusMessage: `Derin analiz: ${turkishName} (${index + 1}/${totalModules})...`,
-                    updatedAt: new Date()
-                });
-            }
-        );
+        const homeTeamSlug = normalizeSlug(matchData.homeTeam?.name || matchData.homeTeam || '');
+        const awayTeamSlug = normalizeSlug(matchData.awayTeam?.name || matchData.awayTeam || '');
+        const season = matchData.season || extractSeason(matchData.matchDate || matchData.date);
 
-        await docRef.update({ deepAnalysis, updatedAt: new Date() });
+        let correlationText = '';
+        try {
+            const correlationResults = await runFullCombinatorialScan(
+                homeTeamSlug, awayTeamSlug, enrichedMatchData, season
+            );
+            correlationText = formatCorrelationsForPrompt(correlationResults);
 
-        // Deep analysis özeti oluştur
-        const deepAnalysisSummary = Object.entries(deepAnalysis)
-            .map(([key, result]) => `${MODULE_NAMES[key] || key}: ${result.summary} (Güven: ${result.confidence}/10)`)
-            .join('\n');
+            await docRef.update({
+                correlationResults: {
+                    scanStats: correlationResults.scanStats,
+                    topFindings: correlationResults.topFindings.slice(0, 15),
+                },
+                updatedAt: new Date()
+            });
 
-        logger.info(`[Pipeline] Deep analysis tamamlandı. Özet:\n${deepAnalysisSummary}`);
+            logger.info(`[Pipeline] Korelasyon taraması tamamlandı: ` +
+                `${correlationResults.scanStats.significantFound} anlamlı, ` +
+                `${correlationResults.scanStats.relevantToMatch} maça uygun`);
+        } catch (corrErr: any) {
+            logger.warn(`[Pipeline] Korelasyon motoru hatası (devam ediliyor): ${corrErr.message}`);
+        }
 
-        // --- STAGE 3: AI PROCESSING (PARALLEL) ---
+        const matchInfo = extractMatchInfo(enrichedMatchData);
+
+        // ══════════════════════════════════════════
+        // STAGE 3: 3 KANAL PARALEL
+        // ══════════════════════════════════════════
+        // Kanal 1: Gemini — Korelasyon Yorumu
+        // Kanal 2A: GPT — İstatistik + Taktik
+        // Kanal 2B: GPT — Hakem + Kaos
+        // ══════════════════════════════════════════
         await docRef.update({
-            status: 'ai_processing',
-            statusMessage: 'Gemini ve Claude yapay zeka modelleri çalışıyor...',
+            status: 'channels',
+            statusMessage: '3 uzman kanalı paralel çalışıyor (Korelasyon + İstatistik + Kaos)...',
             updatedAt: new Date()
         });
 
-        const geminiPrompt = buildInitialPrompt(enrichedMatchData, deepAnalysis, 'Gemini 3.1 Pro Preview');
-        const claudePrompt = buildInitialPrompt(enrichedMatchData, deepAnalysis, 'Claude Opus 4.6');
+        // Kanal 1 prompt'u — korelasyon yoksa fallback deep analysis
+        let channel1Promise: Promise<ChannelResult>;
 
-        const [geminiRaw, claudeRaw] = await Promise.allSettled([
-            callGemini(geminiPrompt, geminiApiKey.value()),
-            callClaude(claudePrompt, anthropicApiKey.value())
+        if (correlationText.length > 100) {
+            // Korelasyon verisi var → Gemini yorumlasın
+            const corrPrompt = buildCorrelationInterpretPrompt(matchInfo, correlationText);
+            channel1Promise = callGemini(corrPrompt, geminiApiKey.value())
+                .then(value => ({ ok: true as const, value, error: '' }))
+                .catch(reason => ({ ok: false as const, value: '', error: String(reason) }));
+        } else {
+            // Korelasyon verisi yetersiz → Deep Analysis fallback
+            logger.info('[Pipeline] Korelasyon verisi yetersiz — deep analysis fallback çalışıyor...');
+            channel1Promise = (async () => {
+                try {
+                    const deepResult = await runDeepAnalysis(
+                        enrichedMatchData, geminiApiKey.value(),
+                        async (moduleName: string, index: number) => {
+                            const turkishName = MODULE_NAMES[moduleName] || moduleName;
+                            await docRef.update({
+                                statusMessage: `Fallback analiz: ${turkishName} (${index + 1}/8)...`,
+                                updatedAt: new Date()
+                            });
+                        }
+                    );
+                    await docRef.update({ deepAnalysis: deepResult, updatedAt: new Date() });
+                    return { ok: true as const, value: JSON.stringify(deepResult), error: '' };
+                } catch (err: any) {
+                    return { ok: false as const, value: '', error: String(err) };
+                }
+            })();
+        }
+
+        // Kanal 2A — İstatistik + Taktik (GPT)
+        const statsTacticsPrompt = buildStatsTacticsPrompt(matchInfo, enrichmentText);
+        const channel2APromise: Promise<ChannelResult> = callGPT(statsTacticsPrompt, openaiApiKey.value())
+            .then(value => ({ ok: true as const, value, error: '' }))
+            .catch(reason => ({ ok: false as const, value: '', error: String(reason) }));
+
+        // Kanal 2B — Hakem + Kaos (GPT)
+        const refereeChaosPrompt = buildRefereeChaosPrompt(matchInfo, enrichmentText);
+        const channel2BPromise: Promise<ChannelResult> = callGPT(refereeChaosPrompt, openaiApiKey.value())
+            .then(value => ({ ok: true as const, value, error: '' }))
+            .catch(reason => ({ ok: false as const, value: '', error: String(reason) }));
+
+        // 3 kanal paralel çalışır
+        const [ch1Result, ch2AResult, ch2BResult] = await Promise.all([
+            channel1Promise, channel2APromise, channel2BPromise
         ]);
 
-        let geminiJson = null;
-        let claudeJson = null;
+        // Sonuçları topla
+        const ch1Text = ch1Result.ok ? ch1Result.value : '{"error": "Kanal 1 başarısız"}';
+        const ch2AText = ch2AResult.ok ? ch2AResult.value : '{"error": "Kanal 2A başarısız"}';
+        const ch2BText = ch2BResult.ok ? ch2BResult.value : '{"error": "Kanal 2B başarısız"}';
 
-        if (geminiRaw.status === 'fulfilled') {
+        // Kanal sonuçlarını kaydet
+        await docRef.update({
+            channelResults: {
+                correlation: ch1Result.ok ? safeParseJSON(ch1Text) : { error: ch1Result.error },
+                statsTactics: ch2AResult.ok ? safeParseJSON(ch2AText) : { error: ch2AResult.error },
+                refereeChaos: ch2BResult.ok ? safeParseJSON(ch2BText) : { error: ch2BResult.error },
+            },
+            updatedAt: new Date()
+        });
+
+        const successfulChannels = [ch1Result, ch2AResult, ch2BResult].filter(r => r.ok).length;
+        logger.info(`[Pipeline] Kanallar tamamlandı: ${successfulChannels}/3 başarılı`);
+
+        if (successfulChannels === 0) {
+            throw new Error('Tüm kanallar başarısız oldu.');
+        }
+
+        // ══════════════════════════════════════════
+        // STAGE 4: 2 SENTEZCİ PARALEL
+        // ══════════════════════════════════════════
+        // Sentezci A: Claude Opus 4.6
+        // Sentezci B: Gemini 3.1 Pro
+        // ══════════════════════════════════════════
+        await docRef.update({
+            status: 'synthesis',
+            statusMessage: 'İki sentezci (Claude + Gemini) paralel analiz yapıyor...',
+            updatedAt: new Date()
+        });
+
+        const synthesisPromptA = buildSynthesisPrompt(matchInfo, ch1Text, ch2AText, ch2BText, 'Claude Opus 4.6 — Sentezci A');
+        const synthesisPromptB = buildSynthesisPrompt(matchInfo, ch1Text, ch2AText, ch2BText, 'Gemini 3.1 Pro — Sentezci B');
+
+        const [synthARaw, synthBRaw] = await Promise.allSettled([
+            callClaude(synthesisPromptA, anthropicApiKey.value()),
+            callGemini(synthesisPromptB, geminiApiKey.value()),
+        ]);
+
+        let synthAJson = null;
+        let synthBJson = null;
+
+        if (synthARaw.status === 'fulfilled') {
             try {
-                geminiJson = parseAIResult(geminiRaw.value, 'Gemini_3_1_Pro_Preview');
-                await docRef.update({ geminiResult: geminiJson, updatedAt: new Date() });
+                synthAJson = parseAIResult(synthARaw.value, 'Claude_Opus_4_6_SynthA');
+                await docRef.update({ synthesisA: synthAJson, updatedAt: new Date() });
             } catch (e: any) {
-                logger.error('Gemini Parse Error:', e);
+                logger.error('Sentezci A (Claude) Parse Error:', e);
             }
         } else {
-            logger.error('Gemini API Error:', geminiRaw.reason);
+            logger.error('Sentezci A (Claude) API Error:', synthARaw.reason);
         }
 
-        if (claudeRaw.status === 'fulfilled') {
+        if (synthBRaw.status === 'fulfilled') {
             try {
-                claudeJson = parseAIResult(claudeRaw.value, 'Claude_Opus_4_6');
-                await docRef.update({ claudeResult: claudeJson, updatedAt: new Date() });
+                synthBJson = parseAIResult(synthBRaw.value, 'Gemini_3_1_Pro_SynthB');
+                await docRef.update({ synthesisB: synthBJson, updatedAt: new Date() });
             } catch (e: any) {
-                logger.error('Claude Parse Error:', e);
+                logger.error('Sentezci B (Gemini) Parse Error:', e);
             }
         } else {
-            logger.error('Claude API Error:', claudeRaw.reason);
+            logger.error('Sentezci B (Gemini) API Error:', synthBRaw.reason);
         }
 
-        if (!geminiJson && !claudeJson) {
-            throw new Error('Tüm AI modelleri başarısız oldu.');
+        if (!synthAJson && !synthBJson) {
+            throw new Error('Her iki sentezci de başarısız oldu.');
         }
 
-        // --- STAGE 4: CONSENSUS ---
-        if (geminiJson && claudeJson) {
-            // Both models succeeded — generate proper consensus
-            await docRef.update({ status: 'consensus', statusMessage: 'Modeller arası uzlaşma sağlanıyor...', updatedAt: new Date() });
-            const consensusPrompt = buildConsensusPrompt(JSON.stringify(geminiJson), JSON.stringify(claudeJson));
-            const consensusRaw = await callConsensus(consensusPrompt, geminiApiKey.value());
+        // ══════════════════════════════════════════
+        // STAGE 5: NİHAİ HAKEM (GPT-5.2)
+        // ══════════════════════════════════════════
+        if (synthAJson && synthBJson) {
+            // İki sentezci de başarılı → Hakem karşılaştırsın
+            await docRef.update({
+                status: 'arbiter',
+                statusMessage: 'Nihai hakem (GPT-5.2) iki sentezciyi karşılaştırıyor...',
+                updatedAt: new Date()
+            });
+
+            const arbiterPrompt = buildArbiterPrompt(
+                matchInfo,
+                JSON.stringify(synthAJson),
+                JSON.stringify(synthBJson)
+            );
+            const arbiterRaw = await callArbiter(arbiterPrompt, openaiApiKey.value());
 
             try {
-                const consensusJson = parseAIResult(consensusRaw, 'Consensus_Gemini_3_1_Pro_Preview');
-                await docRef.update({ consensusResult: consensusJson });
+                const arbiterJson = parseAIResult(arbiterRaw, 'GPT_5_2_Arbiter');
+                await docRef.update({ consensusResult: arbiterJson });
             } catch (e) {
-                logger.error('Consensus Parse Error:', e);
+                logger.error('Hakem (GPT) Parse Error:', e);
                 await docRef.update({
                     consensusResult: {
-                        modelName: 'Consensus_Gemini_Fallback',
+                        modelName: 'GPT_5_2_Arbiter_Fallback',
                         fallback: true,
-                        consensusReasoning: 'Konsensüs ayrıştırma hatası yaşandı. Lütfen bireysel model sonuçlarını inceleyin.',
+                        arbiterReasoning: 'Hakem ayrıştırma hatası yaşandı. Lütfen sentezci sonuçlarını inceleyin.',
                         confidenceScore: 0
                     }
                 });
             }
         } else {
-            // Single-model fallback — use whichever model succeeded as the "consensus"
-            const singleResult = geminiJson || claudeJson;
-            const failedModel = !geminiJson ? 'Gemini' : 'Claude';
-            logger.warn(`Only one AI model succeeded. ${failedModel} failed. Using single-model fallback.`);
+            // Tek sentezci başarılı → direkt sonuç olarak kullan
+            const singleResult = synthAJson || synthBJson;
+            const failedModel = !synthAJson ? 'Claude (Sentezci A)' : 'Gemini (Sentezci B)';
+            logger.warn(`Tek sentezci başarılı. ${failedModel} başarısız. Tek model sonucu kullanılıyor.`);
 
             await docRef.update({
-                status: 'consensus',
-                statusMessage: `${failedModel} başarısız oldu. Tek model sonucu kullanılıyor...`,
+                status: 'arbiter',
+                statusMessage: `${failedModel} başarısız oldu. Tek sentezci sonucu kullanılıyor...`,
                 updatedAt: new Date()
             });
 
             await docRef.update({
                 consensusResult: {
                     ...singleResult,
-                    modelName: `SingleModel_${singleResult!.modelName}`,
-                    singleModelFallback: true,
-                    fallbackNote: `${failedModel} modeli başarısız oldu. Sonuçlar yalnızca ${!geminiJson ? 'Claude' : 'Gemini'} modeline dayanmaktadır.`
+                    modelName: `SingleSynthesis_${singleResult!.modelName}`,
+                    singleSynthesisFallback: true,
+                    fallbackNote: `${failedModel} modeli başarısız oldu. Sonuçlar yalnızca ${!synthAJson ? 'Gemini (Sentezci B)' : 'Claude (Sentezci A)'} modeline dayanmaktadır.`
                 }
             });
         }
 
-        // --- FINALIZATION ---
-        // Clean up matchData to save space since we have deepAnalysis
+        // ══════════════════════════════════════════
+        // FINALIZATION
+        // ══════════════════════════════════════════
         await docRef.update({
             matchData: null,
             status: 'completed',
-            statusMessage: 'Çoklu model analizi tamamlandı!',
+            statusMessage: 'Çok kanallı analiz tamamlandı!',
             updatedAt: new Date()
         });
 
@@ -227,3 +343,46 @@ export const onMultiAnalysisCreated = onDocumentCreated({
         });
     }
 });
+
+// ─────────────────── TYPES ───────────────────
+
+interface ChannelResult {
+    ok: boolean;
+    value: string;
+    error: string;
+}
+
+// ─────────────────── HELPERS ───────────────────
+
+function normalizeSlug(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ü/g, 'u')
+        .replace(/ö/g, 'o').replace(/ç/g, 'c').replace(/ı/g, 'i')
+        .replace(/İ/g, 'i').replace(/Ş/g, 's').replace(/Ğ/g, 'g')
+        .replace(/Ü/g, 'u').replace(/Ö/g, 'o').replace(/Ç/g, 'c')
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .trim();
+}
+
+function extractSeason(dateStr?: string): string {
+    if (!dateStr) return '';
+    try {
+        const d = new Date(dateStr);
+        const year = d.getFullYear();
+        const month = d.getMonth();
+        return month >= 7 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+    } catch {
+        return '';
+    }
+}
+
+function safeParseJSON(text: string): any {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { rawText: text.substring(0, 2000) };
+    }
+}

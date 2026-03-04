@@ -46,7 +46,7 @@ export async function callClaude(prompt: string, apiKey: string): Promise<string
             'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-            model: 'claude-opus-4-6', // User explicitly requested this exact string
+            model: 'claude-opus-4-6',
             max_tokens: 8192,
             temperature: 0.7,
             messages: [{ role: 'user', content: prompt }],
@@ -65,34 +65,76 @@ export async function callClaude(prompt: string, apiKey: string): Promise<string
 }
 
 /**
- * Consensus API çağrısı — Gemini 3.1 Pro Preview (konsensüs modeli)
+ * GPT-5.2 API çağrısı — OpenAI Chat Completions API
+ * Kanal 2A (istatistik+taktik), Kanal 2B (hakem+kaos), Nihai Hakem rollerinde kullanılır.
  */
-export async function callConsensus(prompt: string, apiKey: string): Promise<string> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${apiKey}`;
-
-    const response = await fetch(url, {
+export async function callGPT(prompt: string, apiKey: string): Promise<string> {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-            contents: [
-                { role: 'user', parts: [{ text: 'Sen futbol analiz uzmanısın. İki AI modelini karşılaştırıp tek bir SADECE JSON sonucu üret.' }] },
-                { role: 'user', parts: [{ text: prompt }] },
+            model: 'gpt-5.2',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'Sen uzman bir futbol veri bilimci ve taktik analistisin. Yanıtlarını SADECE JSON formatında ver.',
+                },
+                { role: 'user', content: prompt },
             ],
-            generationConfig: {
-                temperature: 0.5,
-                maxOutputTokens: 8192,
-                responseMimeType: 'application/json',
-            },
+            temperature: 0.7,
+            max_tokens: 8192,
+            response_format: { type: 'json_object' },
+        }),
+        signal: AbortSignal.timeout(180000), // 3 minutes timeout
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        logger.error(`GPT error ${response.status}: ${body.substring(0, 300)}`);
+        throw new Error(`GPT API error: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result.choices?.[0]?.message?.content || '';
+}
+
+/**
+ * Nihai Hakem çağrısı — GPT-5.2
+ * İki sentezci çıktısını karşılaştırır, uyumluysa onaylar, çelişiyorsa çözer.
+ */
+export async function callArbiter(prompt: string, apiKey: string): Promise<string> {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            model: 'gpt-5.2',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'Sen baş hakem ve nihai karar vericisin. İki bağımsız sentezciyi karşılaştırıp tek bir final karara var. Uyumlularsa onayla, çelişiyorlarsa çöz ve gerekçelendir. SADECE JSON formatında yanıt ver.',
+                },
+                { role: 'user', content: prompt },
+            ],
+            temperature: 0.5,
+            max_tokens: 8192,
+            response_format: { type: 'json_object' },
         }),
         signal: AbortSignal.timeout(120000), // 2 minutes timeout
     });
 
     if (!response.ok) {
         const body = await response.text();
-        logger.error(`Consensus (Gemini) error ${response.status}: ${body.substring(0, 300)}`);
-        throw new Error(`Consensus API error: ${response.status}`);
+        logger.error(`Arbiter (GPT) error ${response.status}: ${body.substring(0, 300)}`);
+        throw new Error(`Arbiter API error: ${response.status}`);
     }
 
     const result = await response.json();
-    return result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return result.choices?.[0]?.message?.content || '';
 }
+
